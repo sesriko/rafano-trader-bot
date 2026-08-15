@@ -81,7 +81,6 @@ TOP_300_IHSG = [
 # HELPER FORMATTING NUMBERS & SAFE CASTING
 # ==========================================
 def safe_int(val, default=0):
-    """Casting integer aman dari NaN/Inf"""
     try:
         if pd.isna(val) or np.isinf(val):
             return default
@@ -90,7 +89,6 @@ def safe_int(val, default=0):
         return default
 
 def format_large_number(val, show_sign=False):
-    """Format angka besar ke Million (M) / Billion (B)"""
     if pd.isna(val) or val == 0:
         return "0"
     
@@ -108,7 +106,6 @@ def format_large_number(val, show_sign=False):
 # HELPER MARKET HOURS CONTROL
 # ==========================================
 def is_market_open():
-    """Mengecek apakah saat ini jam bursa IHSG aktif (WIB)"""
     now = datetime.datetime.now()
     weekday = now.weekday()
     
@@ -130,7 +127,6 @@ def is_market_open():
 # ENGINE KALKULASI VSA (VOLUME SPREAD ANALYSIS)
 # ==========================================
 def calculate_vsa_metrics(df):
-    """Menghitung metrik VSA murni berbasis OHLCV"""
     price_range = (df['High'] - df['Low']).replace(0, 0.1)
     body_move = df['Close'] - df['Open']
     
@@ -153,7 +149,6 @@ def calculate_vsa_metrics(df):
 # ENGINE DETEKTOR POWER VOLUME BUY
 # ==========================================
 def check_volume_spike_signal(df, symbol, threshold_multiplier=2.5, min_value_traded=500_000_000):
-    """Mengecek sinyal VSA Power Volume Buy"""
     if len(df) < 20:
         return False, {}
 
@@ -188,7 +183,7 @@ def check_volume_spike_signal(df, symbol, threshold_multiplier=2.5, min_value_tr
     return False, {}
 
 # ==========================================
-# ENGINE GENERATOR CHART HIGH RESOLUTION (HD) WITH SIGNALS
+# ENGINE GENERATOR CHART HIGH RESOLUTION WITH SIGNALS
 # ==========================================
 def generate_pro_chart(df, symbol="MDKA", timeframe="1d", sector_info="Bakrie & Brothers Tbk | Industrials", output_filename="chart_output.png"):
     try:
@@ -221,23 +216,13 @@ def generate_pro_chart(df, symbol="MDKA", timeframe="1d", sector_info="Bakrie & 
         net_5d_vol = df['Net_Vol_VSA'].tail(5).sum()
         net_vol_today = df['Net_Vol_VSA'].iloc[-1]
 
-        vol_ratio_today = last_vol / df['V1'].iloc[-1] if df['V1'].iloc[-1] > 0 else 1.0
-        if last_close > last_open and vol_ratio_today >= 1.8:
-            vsa_status = "ACCUMULATION (HIGH BUY)"
-        elif last_close < last_open and vol_ratio_today >= 1.8:
-            vsa_status = "DISTRIBUTION (HIGH SELL)"
-        elif vol_ratio_today < 0.6:
-            vsa_status = "NO SUPPLY / DRY VOL"
-        else:
-            vsa_status = "NEUTRAL FLOW"
-
         if 'MM' not in df.columns:
             df['MM'] = (df['Close'] - df['EMA_Slow']) / df['EMA_Slow'] * 1000 + np.sin(np.linspace(0, 10, len(df))) * 15 - 10.9258
 
         plt.style.use('dark_background')
         
-        # CANVAS SIZES: 22x12 ULTRA HD
-        fig = plt.figure(figsize=(22, 12), facecolor='#000000')
+        # Canvas Size
+        fig = plt.figure(figsize=(18, 10), facecolor='#000000')
         gs = gridspec.GridSpec(4, 1, height_ratios=[4, 0.2, 1.2, 0.8], hspace=0.04)
 
         ax_main = fig.add_subplot(gs[0])
@@ -284,7 +269,7 @@ def generate_pro_chart(df, symbol="MDKA", timeframe="1d", sector_info="Bakrie & 
         ax_main.step(x_indices, df['Pivot_Low'], where='mid', color='#444444', linestyle=':', linewidth=1.0)
 
         # ==========================================
-        # 🎯 PEMBUATAN SINYAL PANAH & TEKS (BELI > / BAHAYA <)
+        # 🎯 LOGIKA SINYAL PANAH & TEKS (BELI > / BAHAYA <)
         # ==========================================
         for i in range(2, len(df) - 1):
             c_price = df['Close'].iloc[i]
@@ -306,7 +291,7 @@ def generate_pro_chart(df, symbol="MDKA", timeframe="1d", sector_info="Bakrie & 
                 ax_main.text(i, p_high * 1.028, f"BAHAYA <{safe_int(tp_price)}", 
                              color='#ffff00', fontsize=7.5, fontweight='bold', ha='center', zorder=5)
 
-        # Stat Box kiri atas
+        # Stat Box Kiri Atas
         net_vol_str = format_large_number(net_vol_today, show_sign=True)
         net_5d_str = format_large_number(net_5d_vol, show_sign=True)
         
@@ -322,21 +307,21 @@ def generate_pro_chart(df, symbol="MDKA", timeframe="1d", sector_info="Bakrie & 
                      fontfamily='monospace', fontsize=9.5, color='#00ffff',
                      bbox=dict(boxstyle='square,pad=0.4', facecolor='#000000', alpha=0.85, edgecolor='#333333'))
 
-        # Kotak Label Harga Sumbu Kanan (Kuning & Biru Muda)
+        # Label Harga Sumbu Kanan (Kotak Kuning & Biru)
         latest_ph = df['Pivot_High'].iloc[-1]
         latest_pl = df['Pivot_Low'].iloc[-1]
         
         ax_main.text(len(df) + 0.5, latest_ph, f" {safe_int(latest_ph)} ", color='black', backgroundcolor='#ffff00', fontsize=9.5, fontweight='bold')
         ax_main.text(len(df) + 0.5, latest_pl, f" {safe_int(latest_pl)} ", color='black', backgroundcolor='#00ffff', fontsize=9.5, fontweight='bold')
 
-        ax_main.set_xlim(-8, len(df) + 5)
+        ax_main.set_xlim(-4, len(df) + 4)
         main_y_min, main_y_max = df['Low'].min(), df['High'].max()
         ax_main.set_ylim(main_y_min * 0.92, main_y_max * 1.10)
 
         change_pct = ((last_close / df['Close'].iloc[-2]) - 1) * 100 if len(df) > 1 else 0.0
         title_color = '#ffff00' if change_pct >= 0 else '#ff0000'
         
-        # Header HD Teks
+        # Header Teks
         fig.text(0.01, 0.968, f"{symbol} :   {safe_int(last_close)} ({change_pct:+.2f}%)", color=title_color, fontsize=16, fontweight='bold')
         fig.text(0.45, 0.968, "RAFANO TRADER", color='#ffffff', fontsize=16, fontweight='bold')
         
@@ -384,17 +369,18 @@ def generate_pro_chart(df, symbol="MDKA", timeframe="1d", sector_info="Bakrie & 
         last_mm = df['MM'].iloc[-1]
         ax_mm.text(len(df) + 0.5, last_mm, f"{last_mm:.4f}", color='black', backgroundcolor='#ffff00', fontsize=9, fontweight='bold')
 
+        # Formatting Sumbu-X Tanpa Gap Hari Libur
+        step = max(1, len(df) // 8)
+        ax_mm.set_xticks(x_indices[::step])
         if isinstance(df.index, pd.DatetimeIndex):
-            step = max(1, len(df) // 8)
-            ax_mm.set_xticks(x_indices[::step])
             fmt = "%H:%M" if is_intraday else "%b %Y"
             ax_mm.set_xticklabels([df.index[i].strftime(fmt) for i in range(0, len(df), step)])
 
         plt.setp(ax_main.get_xticklabels(), visible=False)
         plt.setp(ax_vol.get_xticklabels(), visible=False)
 
-        # RENDER ULTRA HD: DPI 300
-        plt.savefig(output_filename, dpi=300, bbox_inches='tight', facecolor=fig.get_facecolor())
+        # Standard High Quality Export
+        plt.savefig(output_filename, dpi=180, bbox_inches='tight', facecolor=fig.get_facecolor())
         return output_filename
     finally:
         plt.clf()
@@ -574,7 +560,7 @@ def auto_screener_loop():
             time.sleep(10)
 
 # ==========================================
-# HANDLER TELEGRAM & MAIN POLLING ENGINE
+# HANDLER TELEGRAM (SEND PHOTO PREVIEW)
 # ==========================================
 def send_reply(chat_id, text, reply_markup=None):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -586,14 +572,19 @@ def send_reply(chat_id, text, reply_markup=None):
     except Exception as e:
         print(f"❌ Error Send Message: {e}")
 
-# METHOD SEND DOCUMENT (ANTI KOMPRESI UNTUK TAMPILAN KRISP HD)
-def send_document_reply(chat_id, photo_path, caption=""):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
+# METHOD SEND PHOTO (LANGSUNG TAMPIL GAMBAR MEKAR DI CHAT)
+def send_photo_reply(chat_id, photo_path, caption=""):
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
     try:
-        with open(photo_path, 'rb') as doc:
-            requests.post(url, data={'chat_id': chat_id, 'caption': caption, 'parse_mode': 'Markdown'}, files={'document': doc}, timeout=30)
+        with open(photo_path, 'rb') as photo:
+            requests.post(
+                url, 
+                data={'chat_id': chat_id, 'caption': caption, 'parse_mode': 'Markdown'}, 
+                files={'photo': photo}, 
+                timeout=30
+            )
     except Exception as e:
-        print(f"❌ Error Send Document: {e}")
+        print(f"❌ Error Send Photo: {e}")
 
 def process_chart_request(chat_id, stock_code, timeframe="1d"):
     timeframe = timeframe.lower().strip()
@@ -601,7 +592,7 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
     if timeframe in ['5', '5mi', 'm5']: timeframe = '5m'
     if timeframe in ['15', '15mi', 'm15']: timeframe = '15m'
 
-    send_reply(chat_id, f"📊 *Generating Chart Ultra-HD {stock_code} ({timeframe.upper()})...*")
+    send_reply(chat_id, f"📊 *Generating Chart {stock_code} ({timeframe.upper()})...*")
     
     df = fetch_stock_history_multi_tf(stock_code, timeframe=timeframe)
     
@@ -626,8 +617,8 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
         out_file = f"chart_{stock_code}_{timeframe}.png"
         generate_pro_chart(df, symbol=stock_code, timeframe=timeframe, output_filename=out_file)
         
-        # Pengiriman File Gambar HD
-        send_document_reply(chat_id, out_file, caption=f"📊 *Chart {stock_code} ({timeframe.upper()}) — RAFANO TRADER Engine Ultra HD*")
+        # Menggunakan send_photo_reply agar tampil sebagai foto mekar
+        send_photo_reply(chat_id, out_file, caption=f"📊 *Chart {stock_code} ({timeframe.upper()}) — RAFANO TRADER Engine*")
         
         if os.path.exists(out_file):
             os.remove(out_file)
@@ -635,7 +626,7 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
         send_reply(chat_id, f"❌ Data saham `{stock_code}` tidak ditemukan.")
 
 def main():
-    print("🚀 Starting RAFANO TRADER Bot (Full Signals & Ultra HD Engine)...")
+    print("🚀 Starting RAFANO TRADER Bot (Full Photo Preview & Signal Engine)...")
     global SCREENER_ACTIVE
     
     screener_thread = threading.Thread(target=auto_screener_loop, daemon=True)
@@ -673,7 +664,7 @@ def main():
 
                         if cmd in ["/start", "/help"]:
                             welcome_msg = (
-                                "🤖 *RAFANO TRADER BOT (ULTRA HD & FULL SIGNALS)*\n"
+                                "🤖 *RAFANO TRADER BOT*\n"
                                 "========================================\n"
                                 "Format perintah manual:\n"
                                 "📈 `/c <KODE> <TIMEFRAME>` - Analisa Chart Setup VSA\n"
@@ -682,7 +673,7 @@ def main():
                                 "🌆 `/eod` - Pindai Sinyal End of Day (Daily)\n"
                                 "⏸️ `/pause` - Pause Auto Screener\n"
                                 "▶️ `/resume` - Resume Auto Screener\n\n"
-                                "*Contoh:* `/c MDKA 5m` atau `/c BBCA 1d`"
+                                "*Contoh:* `/c ANTM 1d` atau `/c TBIG 5m`"
                             )
                             send_reply(chat_id, welcome_msg)
 
@@ -714,7 +705,7 @@ def main():
                                 timeframe = parts[2].lower() if len(parts) > 2 else "1d"
                                 threading.Thread(target=process_chart_request, args=(chat_id, stock_code, timeframe), daemon=True).start()
                             else:
-                                send_reply(chat_id, "⚠️ Gunakan format: `/c <KODE> <TIMEFRAME>`\nContoh: `/c MDKA 5m`")
+                                send_reply(chat_id, "⚠️ Gunakan format: `/c <KODE> <TIMEFRAME>`\nContoh: `/c ANTM 1d`")
 
         except Exception as e:
             print(f"⚠️ Exception in Main Loop: {e}")
