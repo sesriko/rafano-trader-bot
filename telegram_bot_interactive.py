@@ -383,7 +383,7 @@ def generate_pro_chart(df, symbol="MDKA", timeframe="1d", sector_info="Indonesia
         plt.close('all')
 
 # ==========================================
-# FETCH DATA MULTI TIMEFRAME (TEROPTIMASI)
+# FETCH DATA MULTI TIMEFRAME (THREAD-SAFE FIXED)
 # ==========================================
 def fetch_stock_history_multi_tf(symbol, timeframe="1d"):
     timeframe = timeframe.lower().strip()
@@ -397,6 +397,7 @@ def fetch_stock_history_multi_tf(symbol, timeframe="1d"):
     yf_setting = yf_tf_map.get(timeframe)
     interval, period = yf_setting if yf_setting else ('1d', '1y')
 
+    # 1. Cek API Arjum Pertama
     if interval == '1d':
         endpoints = [
             f"{ARJUM_API_BASE_URL}/history/{symbol}?interval=1d&limit=150",
@@ -409,17 +410,21 @@ def fetch_stock_history_multi_tf(symbol, timeframe="1d"):
                     data = res.json()
                     klines = data.get("data") or data.get("results") or data
                     if isinstance(klines, list) and len(klines) > 10:
-                        return pd.DataFrame(klines)
+                        df_res = pd.DataFrame(klines)
+                        df_res['Symbol_Owner'] = symbol
+                        return df_res
             except Exception:
                 pass
 
+    # 2. Fallback yfinance (Instance Ticker Terisolasi dari Thread Leak)
     if yf is not None:
         try:
             yf_symbol = symbol if (symbol.endswith(".JK") or not symbol.isalpha()) else f"{symbol}.JK"
-            df_yf = yf.download(yf_symbol, interval=interval, period=period, progress=False, ignore_tz=True)
+            
+            ticker_obj = yf.Ticker(yf_symbol)
+            df_yf = ticker_obj.history(interval=interval, period=period, auto_adjust=False, actions=False)
             
             if df_yf is not None and not df_yf.empty:
-                # Membersihkan MultiIndex yfinance versi baru
                 if isinstance(df_yf.columns, pd.MultiIndex):
                     df_yf.columns = df_yf.columns.get_level_values(0)
                 
@@ -428,19 +433,25 @@ def fetch_stock_history_multi_tf(symbol, timeframe="1d"):
                     if col in df_yf.columns:
                         df_yf[col] = pd.to_numeric(df_yf[col], errors='coerce')
                 
-                return df_yf.dropna(subset=['Close'])
+                df_clean = df_yf.dropna(subset=['Close']).copy()
+                df_clean['Symbol_Owner'] = symbol
+                return df_clean
         except Exception:
             pass
 
     return None
 
 # ==========================================
-# WORKER MULTITHREAD SCANNER VSA
+# WORKER MULTITHREAD SCANNER VSA (WITH OVERWRITE GUARD)
 # ==========================================
 def scan_single_symbol_tf(symbol, timeframe="5m"):
     try:
         df = fetch_stock_history_multi_tf(symbol, timeframe=timeframe)
         if df is not None and len(df) >= 20:
+            # Proteksi Data Overwrite Threading
+            if 'Symbol_Owner' in df.columns and df['Symbol_Owner'].iloc[-1] != symbol:
+                return None
+
             column_mapping = {'open':'Open', 'high':'High', 'low':'Low', 'close':'Close', 'volume':'Volume'}
             df.rename(columns=lambda x: column_mapping.get(str(x).lower().strip(), x), inplace=True)
             
