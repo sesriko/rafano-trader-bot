@@ -643,14 +643,16 @@ def main():
                             welcome_msg = (
                                 "🤖 *RAFANO TRADER BOT*\n"
                                 "========================================\n"
-                                "Format perintah manual:\n"
-                                "📈 `/c <KODE> <TIMEFRAME>` - Analisa Chart Setup VSA\n"
-                                "🔍 `/screener` - Pindai 300 Saham IHSG (5m)\n"
-                                "🌅 `/sesi1` - Pindai Sinyal Akhir Sesi 1 (15m)\n"
-                                "🌆 `/eod` - Pindai Sinyal End of Day (Daily)\n"
+                                "Perintah Scan Sinyal Manual:\n"
+                                "🟢 `/buy` atau `/scanbuy` - Scan Sinyal BUY Daily (1D)\n"
+                                "🌆 `/eod` - Scan Sinyal End of Day (Daily 1D)\n"
+                                "⚡ `/screener` - Scan Sinyal Intraday Cepat (5M)\n"
+                                "🌅 `/sesi1` - Scan Sinyal Akhir Sesi 1 (15M)\n\n"
+                                "Format Perintah Chart:\n"
+                                "📈 `/c <KODE> <TIMEFRAME>` - Analisa Chart Setup VSA\n\n"
+                                "Kontrol Auto-Screener:\n"
                                 "⏸️ `/pause` - Pause Auto Screener\n"
-                                "▶️ `/resume` - Resume Auto Screener\n\n"
-                                "*Contoh:* `/c ANTM 1d` atau `/c TBIG 5m`"
+                                "▶️ `/resume` - Resume Auto Screener"
                             )
                             send_reply(chat_id, welcome_msg)
 
@@ -662,6 +664,18 @@ def main():
                         elif cmd == "/resume":
                             SCREENER_ACTIVE = True
                             send_reply(chat_id, "▶️ *Auto Screener berhasil di-RESUME (Aktif).*")
+
+                        # PERINTAH KHUSUS MANUAL SCAN SINYAL BUY (DAILY 1D)
+                        elif cmd in ["/buy", "/scanbuy"]:
+                            send_reply(chat_id, "🔎 *Memulai pemindaian manual Sinyal BUY (Daily 1D) pada 300 Saham IHSG...*")
+                            
+                            def manual_buy_job(c_id):
+                                start_t = time.time()
+                                signals = run_scan_process_custom_tf(timeframe="1d")
+                                elapsed = time.time() - start_t
+                                broadcast_screening_results(signals, f"MANUAL SCREENER — DAILY (1D) BUY ACCUMULATION ({elapsed:.1f}s)", "1d")
+
+                            threading.Thread(target=manual_buy_job, args=(chat_id,), daemon=True).start()
 
                         elif cmd in ["/sesi1", "/eod", "/screener", "/screen"]:
                             tf_target = "15m" if cmd == "/sesi1" else ("1d" if cmd == "/eod" else "5m")
