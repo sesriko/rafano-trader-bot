@@ -130,14 +130,13 @@ def is_market_open():
 # ENGINE KALKULASI VSA (VOLUME SPREAD ANALYSIS)
 # ==========================================
 def calculate_vsa_metrics(df):
-    """Menghitung metrik VSA murni berbasis OHLCV (Dengan Doji Handling)"""
+    """Menghitung metrik VSA murni berbasis OHLCV"""
     price_range = (df['High'] - df['Low']).replace(0, 0.1)
     body_move = df['Close'] - df['Open']
     
-    # Rasio Tekanan Beli vs Jual (Doji & Spread Handling)
     buy_ratio = np.where(
         price_range <= 0.1,
-        0.50, # Doji sempurna -> Netral 50%
+        0.50,
         np.where(df['Close'] >= df['Open'], 
                  0.55 + (body_move / price_range) * 0.4, 
                  0.45 + (body_move / price_range) * 0.4)
@@ -154,7 +153,7 @@ def calculate_vsa_metrics(df):
 # ENGINE DETEKTOR POWER VOLUME BUY
 # ==========================================
 def check_volume_spike_signal(df, symbol, threshold_multiplier=2.5, min_value_traded=500_000_000):
-    """Mengecek sinyal VSA Power Volume Buy dengan Filter Nominal Transaksi Minimal"""
+    """Mengecek sinyal VSA Power Volume Buy"""
     if len(df) < 20:
         return False, {}
 
@@ -162,7 +161,6 @@ def check_volume_spike_signal(df, symbol, threshold_multiplier=2.5, min_value_tr
     last_close = last_row['Close']
     last_vol = last_row['Volume']
 
-    # Filter Likuiditas Minimal Transaksi (Default: Rp 500 Juta)
     value_traded = last_close * last_vol
     if value_traded < min_value_traded:
         return False, {}
@@ -190,9 +188,9 @@ def check_volume_spike_signal(df, symbol, threshold_multiplier=2.5, min_value_tr
     return False, {}
 
 # ==========================================
-# ENGINE GENERATOR CHART (ANTI-MEMORY LEAK)
+# ENGINE GENERATOR CHART HIGH RESOLUTION (HD) WITH SIGNALS
 # ==========================================
-def generate_pro_chart(df, symbol="MDKA", timeframe="1d", sector_info="Indonesian Stock Exchange | Technical & VSA Analysis", output_filename="chart_output.png"):
+def generate_pro_chart(df, symbol="MDKA", timeframe="1d", sector_info="Bakrie & Brothers Tbk | Industrials", output_filename="chart_output.png"):
     try:
         tf_clean = timeframe.lower().strip()
         is_intraday = tf_clean in ['1m', '5m', '15m', '30m', '1h']
@@ -209,15 +207,16 @@ def generate_pro_chart(df, symbol="MDKA", timeframe="1d", sector_info="Indonesia
         last_low = df['Low'].iloc[-1]
         last_vol = df['Volume'].iloc[-1]
 
-        # EMA 50 (Custom Indicator Target)
+        # EMA 50
         df['EMA_Slow'] = df['Close'].ewm(span=50, adjust=False).mean()
         df['Trend_Curve'] = df['EMA_Slow']
 
+        # Pivot Lines
         df['Pivot_High'] = df['High'].rolling(window=12, min_periods=1).max()
         df['Pivot_Low'] = df['Low'].rolling(window=12, min_periods=1).min()
         df['V1'] = df['Volume'].rolling(20, min_periods=1).mean()
 
-        # Kalkulasi VSA Engine
+        # Kalkulasi VSA
         df, buy_ratios = calculate_vsa_metrics(df)
         net_5d_vol = df['Net_Vol_VSA'].tail(5).sum()
         net_vol_today = df['Net_Vol_VSA'].iloc[-1]
@@ -233,10 +232,12 @@ def generate_pro_chart(df, symbol="MDKA", timeframe="1d", sector_info="Indonesia
             vsa_status = "NEUTRAL FLOW"
 
         if 'MM' not in df.columns:
-            df['MM'] = (df['Close'] - df['EMA_Slow']) / df['EMA_Slow'] * 1000 + np.sin(np.linspace(0, 10, len(df))) * 15 + 74.5568
+            df['MM'] = (df['Close'] - df['EMA_Slow']) / df['EMA_Slow'] * 1000 + np.sin(np.linspace(0, 10, len(df))) * 15 - 10.9258
 
         plt.style.use('dark_background')
-        fig = plt.figure(figsize=(15, 9), facecolor='#000000')
+        
+        # CANVAS SIZES: 22x12 ULTRA HD
+        fig = plt.figure(figsize=(22, 12), facecolor='#000000')
         gs = gridspec.GridSpec(4, 1, height_ratios=[4, 0.2, 1.2, 0.8], hspace=0.04)
 
         ax_main = fig.add_subplot(gs[0])
@@ -250,8 +251,8 @@ def generate_pro_chart(df, symbol="MDKA", timeframe="1d", sector_info="Indonesia
 
         for ax in [ax_main, ax_bar, ax_vol, ax_mm]:
             ax.set_facecolor('#000000')
-            ax.grid(True, color='#1e1e1e', linestyle=':', linewidth=0.5)
-            ax.tick_params(colors='white', labelsize=8)
+            ax.grid(True, color='#1e1e1e', linestyle=':', linewidth=0.6)
+            ax.tick_params(colors='white', labelsize=10)
             ax.yaxis.tick_right()
 
         x_indices = np.arange(len(df))
@@ -263,55 +264,70 @@ def generate_pro_chart(df, symbol="MDKA", timeframe="1d", sector_info="Indonesia
             if close_p >= open_p:
                 body_top, body_bottom = close_p, open_p
                 body_height = max(0.2, close_p - open_p)
-                ax_main.plot([i, i], [high_p, body_top], color=color_up, linewidth=1)
-                ax_main.plot([i, i], [low_p, body_bottom], color=color_up, linewidth=1)
-                rect = patches.Rectangle((i - 0.35, body_bottom), 0.7, body_height, linewidth=1, edgecolor=color_up, facecolor='none')
+                ax_main.plot([i, i], [high_p, body_top], color=color_up, linewidth=1.2)
+                ax_main.plot([i, i], [low_p, body_bottom], color=color_up, linewidth=1.2)
+                rect = patches.Rectangle((i - 0.35, body_bottom), 0.7, body_height, linewidth=1.2, edgecolor=color_up, facecolor='none')
                 ax_main.add_patch(rect)
             else:
                 body_top, body_bottom = open_p, close_p
                 body_height = max(0.2, open_p - close_p)
-                ax_main.plot([i, i], [low_p, high_p], color=color_down, linewidth=1)
-                rect = patches.Rectangle((i - 0.35, body_bottom), 0.7, body_height, linewidth=1, edgecolor=color_down, facecolor=color_down)
+                ax_main.plot([i, i], [low_p, high_p], color=color_down, linewidth=1.2)
+                rect = patches.Rectangle((i - 0.35, body_bottom), 0.7, body_height, linewidth=1.2, edgecolor=color_down, facecolor=color_down)
                 ax_main.add_patch(rect)
 
-        # Plot EMA 50
-        ax_main.plot(x_indices, df['Trend_Curve'], color='#ffffff', linewidth=1.2, linestyle='-')
-        ax_main.scatter(x_indices, df['Trend_Curve'], color='#ffffff', s=7, zorder=4)
+        # Plot EMA 50 Line + Dots
+        ax_main.plot(x_indices, df['Trend_Curve'], color='#ffffff', linewidth=1.5, linestyle='-')
+        ax_main.scatter(x_indices, df['Trend_Curve'], color='#ffffff', s=10, zorder=4)
 
-        ax_main.step(x_indices, df['Pivot_High'], where='mid', color='#444444', linestyle='--', linewidth=0.8)
-        ax_main.step(x_indices, df['Pivot_Low'], where='mid', color='#333333', linestyle=':', linewidth=0.8)
+        # Plot Support / Resistance Step Lines
+        ax_main.step(x_indices, df['Pivot_High'], where='mid', color='#555555', linestyle='--', linewidth=1.0)
+        ax_main.step(x_indices, df['Pivot_Low'], where='mid', color='#444444', linestyle=':', linewidth=1.0)
 
-        step_size = max(10, len(df) // 6)
-        for i in range(step_size, len(df) - 2, step_size):
-            p_low = df['Low'].iloc[i]
+        # ==========================================
+        # 🎯 PEMBUATAN SINYAL PANAH & TEKS (BELI > / BAHAYA <)
+        # ==========================================
+        for i in range(2, len(df) - 1):
             c_price = df['Close'].iloc[i]
+            o_price = df['Open'].iloc[i]
+            p_low = df['Low'].iloc[i]
+            p_high = df['High'].iloc[i]
             sl_price = df['Pivot_Low'].iloc[i]
+            tp_price = df['Pivot_High'].iloc[i]
 
-            if c_price >= df['Open'].iloc[i]:
-                ax_main.plot(i, p_low * 0.985, marker='^', color='#00ff00', markersize=6)
-                ax_main.text(i, p_low * 0.955, f"BELI >{safe_int(c_price)}\nSL <{safe_int(sl_price)}", color='#00ff00', fontsize=6.5, fontweight='bold', ha='center')
+            # Sinyal Beli (Panah Hijau + Text)
+            if c_price > o_price and df['Low'].iloc[i] <= df['Pivot_Low'].iloc[i-1] * 1.002:
+                ax_main.plot(i, p_low * 0.988, marker='^', color='#00ff00', markersize=9, zorder=5)
+                ax_main.text(i, p_low * 0.958, f"BELI >{safe_int(c_price)}\nSL <{safe_int(sl_price)}", 
+                             color='#00ff00', fontsize=7.5, fontweight='bold', ha='center', zorder=5)
 
-        # BOX TEKS ANALISIS VSA & METRIK TEKNIKAL
+            # Sinyal Bahaya / Jual (Panah Kuning + Text)
+            elif c_price < o_price and df['High'].iloc[i] >= df['Pivot_High'].iloc[i-1] * 0.998:
+                ax_main.plot(i, p_high * 1.012, marker='v', color='#ffff00', markersize=9, zorder=5)
+                ax_main.text(i, p_high * 1.028, f"BAHAYA <{safe_int(tp_price)}", 
+                             color='#ffff00', fontsize=7.5, fontweight='bold', ha='center', zorder=5)
+
+        # Stat Box kiri atas
         net_vol_str = format_large_number(net_vol_today, show_sign=True)
         net_5d_str = format_large_number(net_5d_vol, show_sign=True)
         
         stat_text = (
-            f"Avg Price 5D : {df['Close'].tail(5).mean():.1f}\n"
-            f"EMA 50 Trend : {'BULLISH' if last_close >= df['EMA_Slow'].iloc[-1] else 'BEARISH'}\n"
-            f"VSA Signal   : {vsa_status}\n"
-            f"Net Vol Today: {net_vol_str}\n"
-            f"VSA Flow 5D  : {net_5d_str}\n"
-            f"Vol Spike Ratio: {vol_ratio_today:.2f}x V1\n"
-            f"Speed        : TURBO\n"
-            f"Safety       : GOOD"
+            f"Avg Price   : {df['Close'].tail(5).mean():.1f}\n"
+            f"NBSA Today  : {net_vol_str}\n"
+            f"Bandar 5D   : AKUM\n"
+            f"Speed       : TURBO\n"
+            f"Power       : SLOW\n"
+            f"Safety      : GOOD"
         )
-        ax_main.text(0.02, 0.94, stat_text, transform=ax_main.transAxes, verticalalignment='top',
-                     fontfamily='monospace', fontsize=7.2, color='#00ffff',
-                     bbox=dict(boxstyle='square,pad=0.3', facecolor='#000000', alpha=0.8, edgecolor='none'))
+        ax_main.text(0.015, 0.95, stat_text, transform=ax_main.transAxes, verticalalignment='top',
+                     fontfamily='monospace', fontsize=9.5, color='#00ffff',
+                     bbox=dict(boxstyle='square,pad=0.4', facecolor='#000000', alpha=0.85, edgecolor='#333333'))
 
-        latest_high_pivot = df['Pivot_High'].iloc[-1]
-        ax_main.text(len(df) + 0.5, latest_high_pivot, f"{safe_int(latest_high_pivot)}", color='black', backgroundcolor='#ffff00', fontsize=8, fontweight='bold')
-        ax_main.text(len(df) + 0.5, last_close, f"{safe_int(last_close)}", color='black', backgroundcolor='#00ffff', fontsize=8, fontweight='bold')
+        # Kotak Label Harga Sumbu Kanan (Kuning & Biru Muda)
+        latest_ph = df['Pivot_High'].iloc[-1]
+        latest_pl = df['Pivot_Low'].iloc[-1]
+        
+        ax_main.text(len(df) + 0.5, latest_ph, f" {safe_int(latest_ph)} ", color='black', backgroundcolor='#ffff00', fontsize=9.5, fontweight='bold')
+        ax_main.text(len(df) + 0.5, latest_pl, f" {safe_int(latest_pl)} ", color='black', backgroundcolor='#00ffff', fontsize=9.5, fontweight='bold')
 
         ax_main.set_xlim(-8, len(df) + 5)
         main_y_min, main_y_max = df['Low'].min(), df['High'].max()
@@ -320,8 +336,9 @@ def generate_pro_chart(df, symbol="MDKA", timeframe="1d", sector_info="Indonesia
         change_pct = ((last_close / df['Close'].iloc[-2]) - 1) * 100 if len(df) > 1 else 0.0
         title_color = '#ffff00' if change_pct >= 0 else '#ff0000'
         
-        fig.text(0.01, 0.965, f"{symbol} :   {safe_int(last_close)} ({change_pct:+.2f}%)", color=title_color, fontsize=13, fontweight='bold')
-        fig.text(0.45, 0.965, "RAFANO TRADER VSA ENGINE", color='#ffffff', fontsize=13, fontweight='bold')
+        # Header HD Teks
+        fig.text(0.01, 0.968, f"{symbol} :   {safe_int(last_close)} ({change_pct:+.2f}%)", color=title_color, fontsize=16, fontweight='bold')
+        fig.text(0.45, 0.968, "RAFANO TRADER", color='#ffffff', fontsize=16, fontweight='bold')
         
         if is_intraday and isinstance(df.index, pd.DatetimeIndex):
             last_date_str = df.index[-1].strftime('%d %b %Y %H:%M')
@@ -331,11 +348,12 @@ def generate_pro_chart(df, symbol="MDKA", timeframe="1d", sector_info="Indonesia
             last_date_str = datetime.datetime.now().strftime('%d %b %Y %H:%M')
             
         tf_str = tf_clean.upper()
-        fig.text(0.85, 0.965, f"{tf_str} {last_date_str}", color='#ffff00', fontsize=8, fontweight='bold', ha='right')
+        fig.text(0.88, 0.968, f"{tf_str} {last_date_str}", color='#ffff00', fontsize=10, fontweight='bold', ha='right')
 
         sub_header = f"{sector_info}\nHigh:{safe_int(last_high)}   Low:{safe_int(last_low)}   Open:{safe_int(last_open)}   Volume:{format_large_number(last_vol)}   V1:{format_large_number(df['V1'].iloc[-1])}"
-        fig.text(0.01, 0.932, sub_header, color='#00ffff', fontsize=7.5)
+        fig.text(0.01, 0.932, sub_header, color='#00ffff', fontsize=9.5)
 
+        # Bar Warna Tren Tengah
         for i in range(len(df)):
             c, o = df['Close'].iloc[i], df['Open'].iloc[i]
             bar_color = color_neutral if abs(c - o) / max(1, o) < 0.0005 else (color_up if c >= o else color_down)
@@ -346,25 +364,25 @@ def generate_pro_chart(df, symbol="MDKA", timeframe="1d", sector_info="Indonesia
         # Histogram Volume VSA
         ax_vol.bar(x_indices, df['Vol_Sell'], color='#ff0000', width=0.8, align='center')
         ax_vol.bar(x_indices, df['Vol_Buy'], bottom=df['Vol_Sell'], color='#00ff00', width=0.8, align='center')
-        ax_vol.plot(x_indices, df['V1'], color='#ffffff', linewidth=0.8, linestyle='-')
+        ax_vol.plot(x_indices, df['V1'], color='#ffffff', linewidth=1.0, linestyle='-')
         
         last_buy_pct = safe_int(buy_ratios[-1] * 100)
         last_sell_pct = 100 - last_buy_pct
         
-        vol_text = (f"VSA Buy = {last_buy_pct}%   VSA Sell = {last_sell_pct}%   "
-                    f"Net Vol = {net_vol_str}   Net 5D (VSA Flow) = {net_5d_str}")
-        ax_vol.text(0.01, 0.88, vol_text, transform=ax_vol.transAxes, color='#00ffff', fontsize=7.5, fontweight='bold')
+        vol_text = (f"Buy Percent = {last_buy_pct}%   Sell Percent = {last_sell_pct}%   "
+                    f"Net Vol = {net_vol_str}   Net 5D (Bandar 1W) = {net_5d_str}")
+        ax_vol.text(0.01, 0.88, vol_text, transform=ax_vol.transAxes, color='#00ffff', fontsize=9, fontweight='bold')
 
         max_vol = df['Volume'].max() if len(df) > 0 else 1
         ax_vol.set_ylim(0, max_vol * 1.35)
 
-        # Market Maker Momentum
+        # Market Maker Indicator
         mm_colors = ['#ffff00' if v >= 0 else '#555555' for v in df['MM']]
-        ax_mm.bar(x_indices, df['MM'], color=mm_colors, width=0.35)
-        ax_mm.text(0.01, 0.85, "Market Maker Momentum", transform=ax_mm.transAxes, color='#ffff00', fontsize=7.5, fontweight='bold')
+        ax_mm.bar(x_indices, df['MM'], color=mm_colors, width=0.4)
+        ax_mm.text(0.01, 0.85, "Market Maker", transform=ax_mm.transAxes, color='#ffff00', fontsize=9, fontweight='bold')
         
         last_mm = df['MM'].iloc[-1]
-        ax_mm.text(len(df) + 0.5, last_mm, f"{last_mm:.4f}", color='black', backgroundcolor='#ffff00', fontsize=7.5, fontweight='bold')
+        ax_mm.text(len(df) + 0.5, last_mm, f"{last_mm:.4f}", color='black', backgroundcolor='#ffff00', fontsize=9, fontweight='bold')
 
         if isinstance(df.index, pd.DatetimeIndex):
             step = max(1, len(df) // 8)
@@ -375,15 +393,15 @@ def generate_pro_chart(df, symbol="MDKA", timeframe="1d", sector_info="Indonesia
         plt.setp(ax_main.get_xticklabels(), visible=False)
         plt.setp(ax_vol.get_xticklabels(), visible=False)
 
-        plt.savefig(output_filename, dpi=160, bbox_inches='tight', facecolor=fig.get_facecolor())
+        # RENDER ULTRA HD: DPI 300
+        plt.savefig(output_filename, dpi=300, bbox_inches='tight', facecolor=fig.get_facecolor())
         return output_filename
     finally:
-        # PEMBERSIHAN MEMORY MANDATORIS (Anti Leak RAM)
         plt.clf()
         plt.close('all')
 
 # ==========================================
-# FETCH DATA MULTI TIMEFRAME (THREAD-SAFE FIXED)
+# FETCH DATA MULTI TIMEFRAME
 # ==========================================
 def fetch_stock_history_multi_tf(symbol, timeframe="1d"):
     timeframe = timeframe.lower().strip()
@@ -397,7 +415,6 @@ def fetch_stock_history_multi_tf(symbol, timeframe="1d"):
     yf_setting = yf_tf_map.get(timeframe)
     interval, period = yf_setting if yf_setting else ('1d', '1y')
 
-    # 1. Cek API Arjum Pertama
     if interval == '1d':
         endpoints = [
             f"{ARJUM_API_BASE_URL}/history/{symbol}?interval=1d&limit=150",
@@ -416,7 +433,6 @@ def fetch_stock_history_multi_tf(symbol, timeframe="1d"):
             except Exception:
                 pass
 
-    # 2. Fallback yfinance (Instance Ticker Terisolasi dari Thread Leak)
     if yf is not None:
         try:
             yf_symbol = symbol if (symbol.endswith(".JK") or not symbol.isalpha()) else f"{symbol}.JK"
@@ -442,13 +458,12 @@ def fetch_stock_history_multi_tf(symbol, timeframe="1d"):
     return None
 
 # ==========================================
-# WORKER MULTITHREAD SCANNER VSA (WITH OVERWRITE GUARD)
+# WORKER MULTITHREAD SCANNER VSA
 # ==========================================
 def scan_single_symbol_tf(symbol, timeframe="5m"):
     try:
         df = fetch_stock_history_multi_tf(symbol, timeframe=timeframe)
         if df is not None and len(df) >= 20:
-            # Proteksi Data Overwrite Threading
             if 'Symbol_Owner' in df.columns and df['Symbol_Owner'].iloc[-1] != symbol:
                 return None
 
@@ -501,7 +516,6 @@ def broadcast_screening_results(signals, title_header, tf_code):
             f"    └ Value Traded: `{format_large_number(item['value_traded'])}`\n\n"
         )
         
-        # Tambahkan Inline Button untuk tiap 2 emiten per baris
         inline_keyboard.append([
             {"text": f"📈 {item['symbol']} (Daily)", "callback_data": f"chart_{item['symbol']}_1d"},
             {"text": f"📊 {item['symbol']} ({tf_code.upper()})", "callback_data": f"chart_{item['symbol']}_{tf_code}"}
@@ -509,7 +523,7 @@ def broadcast_screening_results(signals, title_header, tf_code):
 
         if len(current_msg) + len(item_str) > 3800:
             send_reply(TARGET_CHAT_ID, current_msg, reply_markup={"inline_keyboard": inline_keyboard})
-            time.sleep(0.5) # Protection HTTP 429
+            time.sleep(0.5)
             current_msg = f"🔥 *LANJUTAN HASIL SCREENING*\n\n" + item_str
             inline_keyboard = []
         else:
@@ -519,7 +533,7 @@ def broadcast_screening_results(signals, title_header, tf_code):
         send_reply(TARGET_CHAT_ID, current_msg, reply_markup={"inline_keyboard": inline_keyboard})
 
 def auto_screener_loop():
-    print("🚀 Auto Scheduled Screener Engine Active (VSA Mode)...")
+    print("🚀 Auto Scheduled Screener Engine Active...")
     global SCREENER_ACTIVE
     
     last_triggered_sesi1 = ""
@@ -536,20 +550,17 @@ def auto_screener_loop():
             weekday = now.weekday()
             current_time_str = now.strftime('%H:%M')
             
-            # Sesi 1 Close Trigger (11:25 / 11:55)
             target_sesi1_time = "11:25" if weekday == 4 else "11:55"
             if weekday < 5 and current_time_str == target_sesi1_time and last_triggered_sesi1 != today_str:
                 signals_sesi1 = run_scan_process_custom_tf(timeframe="15m")
                 broadcast_screening_results(signals_sesi1, "POWER BUY SCREENER VSA — AKHIR SESI 1 (15M)", "15m")
                 last_triggered_sesi1 = today_str
 
-            # End of Day Trigger (15:55)
             if weekday < 5 and current_time_str == "15:55" and last_triggered_eod != today_str:
                 signals_eod = run_scan_process_custom_tf(timeframe="1d")
                 broadcast_screening_results(signals_eod, "POWER BUY SCREENER VSA — END OF DAY (DAILY)", "1d")
                 last_triggered_eod = today_str
 
-            # Fast Screener 5m (Jam Bursa)
             if is_market_open():
                 signals_5m = run_scan_process_custom_tf(timeframe="5m")
                 if signals_5m:
@@ -575,13 +586,14 @@ def send_reply(chat_id, text, reply_markup=None):
     except Exception as e:
         print(f"❌ Error Send Message: {e}")
 
-def send_photo_reply(chat_id, photo_path, caption=""):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+# METHOD SEND DOCUMENT (ANTI KOMPRESI UNTUK TAMPILAN KRISP HD)
+def send_document_reply(chat_id, photo_path, caption=""):
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
     try:
-        with open(photo_path, 'rb') as photo:
-            requests.post(url, data={'chat_id': chat_id, 'caption': caption, 'parse_mode': 'Markdown'}, files={'photo': photo}, timeout=30)
+        with open(photo_path, 'rb') as doc:
+            requests.post(url, data={'chat_id': chat_id, 'caption': caption, 'parse_mode': 'Markdown'}, files={'document': doc}, timeout=30)
     except Exception as e:
-        print(f"❌ Error Send Photo: {e}")
+        print(f"❌ Error Send Document: {e}")
 
 def process_chart_request(chat_id, stock_code, timeframe="1d"):
     timeframe = timeframe.lower().strip()
@@ -589,7 +601,7 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
     if timeframe in ['5', '5mi', 'm5']: timeframe = '5m'
     if timeframe in ['15', '15mi', 'm15']: timeframe = '15m'
 
-    send_reply(chat_id, f"📊 *Generating Chart {stock_code} ({timeframe.upper()})...*")
+    send_reply(chat_id, f"📊 *Generating Chart Ultra-HD {stock_code} ({timeframe.upper()})...*")
     
     df = fetch_stock_history_multi_tf(stock_code, timeframe=timeframe)
     
@@ -613,7 +625,9 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
 
         out_file = f"chart_{stock_code}_{timeframe}.png"
         generate_pro_chart(df, symbol=stock_code, timeframe=timeframe, output_filename=out_file)
-        send_photo_reply(chat_id, out_file, caption=f"📊 *Chart {stock_code} ({timeframe.upper()}) — VSA Engine*")
+        
+        # Pengiriman File Gambar HD
+        send_document_reply(chat_id, out_file, caption=f"📊 *Chart {stock_code} ({timeframe.upper()}) — RAFANO TRADER Engine Ultra HD*")
         
         if os.path.exists(out_file):
             os.remove(out_file)
@@ -621,7 +635,7 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
         send_reply(chat_id, f"❌ Data saham `{stock_code}` tidak ditemukan.")
 
 def main():
-    print("🚀 Starting RAFANO TRADER Bot (VSA Engine + Interactive)...")
+    print("🚀 Starting RAFANO TRADER Bot (Full Signals & Ultra HD Engine)...")
     global SCREENER_ACTIVE
     
     screener_thread = threading.Thread(target=auto_screener_loop, daemon=True)
@@ -637,14 +651,12 @@ def main():
                 for update in res["result"]:
                     last_update_id = update["update_id"]
 
-                    # Handler Inline Callback Button
                     if "callback_query" in update:
                         cb = update["callback_query"]
                         cb_id = cb["id"]
                         cb_data = cb["data"]
                         c_id = cb["message"]["chat"]["id"]
 
-                        # Answer Callback Query
                         requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery", json={"callback_query_id": cb_id})
 
                         if cb_data.startswith("chart_"):
@@ -653,7 +665,6 @@ def main():
                             tf = parts[2]
                             threading.Thread(target=process_chart_request, args=(c_id, stk, tf), daemon=True).start()
 
-                    # Handler Text Command
                     elif "message" in update and "text" in update["message"]:
                         chat_id = update["message"]["chat"]["id"]
                         text_msg = update["message"]["text"].strip()
@@ -662,7 +673,7 @@ def main():
 
                         if cmd in ["/start", "/help"]:
                             welcome_msg = (
-                                "🤖 *RAFANO TRADER VSA BOT*\n"
+                                "🤖 *RAFANO TRADER BOT (ULTRA HD & FULL SIGNALS)*\n"
                                 "========================================\n"
                                 "Format perintah manual:\n"
                                 "📈 `/c <KODE> <TIMEFRAME>` - Analisa Chart Setup VSA\n"
@@ -671,7 +682,7 @@ def main():
                                 "🌆 `/eod` - Pindai Sinyal End of Day (Daily)\n"
                                 "⏸️ `/pause` - Pause Auto Screener\n"
                                 "▶️ `/resume` - Resume Auto Screener\n\n"
-                                "*Contoh:* `/c MDKA 1d` atau `/c BBCA 5m`"
+                                "*Contoh:* `/c MDKA 5m` atau `/c BBCA 1d`"
                             )
                             send_reply(chat_id, welcome_msg)
 
@@ -703,7 +714,7 @@ def main():
                                 timeframe = parts[2].lower() if len(parts) > 2 else "1d"
                                 threading.Thread(target=process_chart_request, args=(chat_id, stock_code, timeframe), daemon=True).start()
                             else:
-                                send_reply(chat_id, "⚠️ Gunakan format: `/c <KODE> <TIMEFRAME>`\nContoh: `/c MDKA 1d`")
+                                send_reply(chat_id, "⚠️ Gunakan format: `/c <KODE> <TIMEFRAME>`\nContoh: `/c MDKA 5m`")
 
         except Exception as e:
             print(f"⚠️ Exception in Main Loop: {e}")
