@@ -168,10 +168,10 @@ def check_volume_spike_signal(df, symbol, threshold_multiplier=1.2, min_value_tr
     last_open = last_row['Open']
     last_buy_ratio = buy_ratios[-1]
     
+    # Memakai EMA 50 untuk sinyal tren utama
     df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
     ema_50 = df['EMA50'].iloc[-1]
 
-    # Screener Trigger: Close > EMA50, Volume Spike, Accumulation Safe
     if (last_close > ema_50) and (last_vol >= (avg_vol_v1 * threshold_multiplier)) and (last_close > last_open) and (last_buy_ratio >= 0.55):
         vol_multiple = last_vol / avg_vol_v1 if avg_vol_v1 > 0 else 0
         change_pct = ((last_close / df['Close'].iloc[-2]) - 1) * 100 if len(df) > 1 else 0.0
@@ -183,7 +183,7 @@ def check_volume_spike_signal(df, symbol, threshold_multiplier=1.2, min_value_tr
     return False, {}
 
 # ==========================================
-# ENGINE CHARTING WITH ULTIMATE SIGNALS
+# ENGINE CHARTING WITH CLEAN DASHBOARD KANAN ATAS
 # ==========================================
 def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Bakrie & Brothers Tbk | Industrials", output_filename="chart_output.png"):
     try:
@@ -255,16 +255,19 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Bakrie & 
 
         # Plot Trend Curve (EMA 50)
         ax_main.plot(x_indices, df['Trend_Curve'], color='#ffffff', linewidth=1.5, linestyle='-')
-        ax_main.scatter(x_indices, df['Trend_Curve'], color='#ffffff', s=10, zorder=4)
 
         # Plot Dynamic Pivots
         ax_main.step(x_indices, df['Pivot_High'], where='mid', color='#555555', linestyle='--', linewidth=1.0)
         ax_main.step(x_indices, df['Pivot_Low'], where='mid', color='#444444', linestyle=':', linewidth=1.0)
 
         # ==========================================
-        # 🎯 LOGIKA SINYAL ULTIMATE (BELI, TP1, TP2, BAHAYA)
+        # 🎯 PENANDA SINYAL SIMPEL (TANPA MENUTUPI CHART)
         # ==========================================
         last_signal_idx = -10
+        latest_setup = {
+            "status": "WAIT & SEE", "entry": 0, "tp1": 0, "tp2": 0, "danger": 0
+        }
+
         for i in range(2, len(df)):
             c_price, o_price = df['Close'].iloc[i], df['Open'].iloc[i]
             vol_curr, vol_avg = df['Volume'].iloc[i], df['V1'].iloc[i]
@@ -274,54 +277,66 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Bakrie & 
 
             is_accum_trend = (c_price > ema_50) and (c_price > o_price) and (vol_curr >= vol_avg * 1.0) and (b_ratio >= 0.55)
 
-            if is_accum_trend and (i - last_signal_idx >= 5):
+            if is_accum_trend and (i - last_signal_idx >= 4):
                 buy_price = round_to_ihsg_fraction(c_price)
                 tp1_price = round_to_ihsg_fraction(buy_price * 1.035)
                 tp2_price = round_to_ihsg_fraction(buy_price + (1.5 * atr_val))
                 swing_low = df['Pivot_Low'].iloc[i]
                 danger_price = round_to_ihsg_fraction(min(swing_low, buy_price - (1.0 * atr_val)))
 
-                ax_main.plot(i, df['Low'].iloc[i] * 0.985, marker='^', color='#00ff00', markersize=9, zorder=6)
+                # Hanya plot panah hijau kecil tanpa teks besar yang menutupi candle
+                ax_main.plot(i, df['Low'].iloc[i] * 0.985, marker='^', color='#00ff00', markersize=7, zorder=6)
                 
-                lbl_text = (
-                    f"BELI > {buy_price}\n"
-                    f"TP1 > {tp1_price} (+3.5%)\n"
-                    f"TP2 > {tp2_price} (ATR)\n"
-                    f"BAHAYA < {danger_price}"
-                )
-                
-                ax_main.text(
-                    i, df['Low'].iloc[i] * 0.94, lbl_text, 
-                    color='#00ff00', fontsize=7.5, fontweight='bold', ha='center',
-                    bbox=dict(boxstyle='round,pad=0.3', facecolor='#000000', alpha=0.85, edgecolor='#00ff00')
-                )
+                # Sinyal Beli Pada Bar Terakhir
+                if i >= len(df) - 3:
+                    ax_main.text(i, df['Low'].iloc[i] * 0.95, f"BUY @ {buy_price}", color='#00ff00', fontsize=8, fontweight='bold', ha='center',
+                                 bbox=dict(boxstyle='round,pad=0.2', facecolor='#000000', alpha=0.9, edgecolor='#00ff00'))
+
+                latest_setup = {
+                    "status": "BUY ACCUMULATION",
+                    "entry": buy_price,
+                    "tp1": tp1_price,
+                    "tp2": tp2_price,
+                    "danger": danger_price
+                }
                 last_signal_idx = i
 
-            elif (c_price < o_price) and (df['High'].iloc[i] >= df['Pivot_High'].iloc[i-1] * 0.998) and (i - last_signal_idx >= 5):
-                ax_main.plot(i, df['High'].iloc[i] * 1.012, marker='v', color='#ffff00', markersize=9, zorder=6)
-                ax_main.text(i, df['High'].iloc[i] * 1.028, f"BAHAYA <{safe_int(df['Pivot_High'].iloc[i])}", 
-                             color='#ffff00', fontsize=7.5, fontweight='bold', ha='center', zorder=6)
-                last_signal_idx = i
-
-        net_vol_str = format_large_number(net_vol_today, show_sign=True)
-        net_5d_str = format_large_number(net_5d_vol, show_sign=True)
+        # ==========================================
+        # 📋 DASHBOARD SIMPLE DI KANAN ATAS CHART
+        # ==========================================
+        status_color = "#00ff00" if latest_setup["status"] == "BUY ACCUMULATION" else "#ffff00"
         
-        stat_text = (
-            f"Avg Price   : {df['Close'].tail(5).mean():.1f}\n"
-            f"NBSA Today  : {net_vol_str}\n"
-            f"Bandar 5D   : ACCUM\n"
-            f"Speed       : TURBO\n"
-            f"Power       : STRONG\n"
-            f"Safety      : SAFE"
+        dashboard_text = (
+            f"   📊 RAFANO TRADER DASHBOARD   \n"
+            f" ------------------------------- \n"
+            f" STATUS     : {latest_setup['status']}\n"
+            f" ENTRY      : {latest_setup['entry'] if latest_setup['entry'] > 0 else last_close}\n"
+            f" TP1 (+3.5%): {latest_setup['tp1'] if latest_setup['tp1'] > 0 else round_to_ihsg_fraction(last_close*1.035)}\n"
+            f" TP2 (ATR)  : {latest_setup['tp2'] if latest_setup['tp2'] > 0 else round_to_ihsg_fraction(last_close*1.07)}\n"
+            f" DANGER / SL: {latest_setup['danger'] if latest_setup['danger'] > 0 else round_to_ihsg_fraction(last_close*0.95)}\n"
+            f" ------------------------------- \n"
+            f" BANDAR 1W  : {'ACCUM' if net_5d_vol >= 0 else 'DISTRIB'}\n"
+            f" NET VOL 1D : {format_large_number(net_vol_today, show_sign=True)}"
         )
-        ax_main.text(0.015, 0.95, stat_text, transform=ax_main.transAxes, verticalalignment='top',
-                     fontfamily='monospace', fontsize=9.5, color='#00ffff',
-                     bbox=dict(boxstyle='square,pad=0.4', facecolor='#000000', alpha=0.85, edgecolor='#333333'))
+        
+        # Posisikan kotak dashboard bersih di kanan atas
+        ax_main.text(0.985, 0.95, dashboard_text, transform=ax_main.transAxes, verticalalignment='top', horizontalalignment='right',
+                     fontfamily='monospace', fontsize=9, color=status_color,
+                     bbox=dict(boxstyle='round,pad=0.5', facecolor='#000000', alpha=0.88, edgecolor='#444444'))
+
+        # Stat Tambahan Kiri Atas Sederhana
+        stat_text_left = (
+            f"Avg Price : {df['Close'].tail(5).mean():.1f}\n"
+            f"VSA Buy   : {safe_int(buy_ratios[-1]*100)}%"
+        )
+        ax_main.text(0.015, 0.95, stat_text_left, transform=ax_main.transAxes, verticalalignment='top',
+                     fontfamily='monospace', fontsize=9, color='#00ffff',
+                     bbox=dict(boxstyle='square,pad=0.3', facecolor='#000000', alpha=0.8, edgecolor='#222222'))
 
         latest_ph = df['Pivot_High'].iloc[-1]
         latest_pl = df['Pivot_Low'].iloc[-1]
-        ax_main.text(len(df) + 0.5, latest_ph, f" {safe_int(latest_ph)} ", color='black', backgroundcolor='#ffff00', fontsize=9.5, fontweight='bold')
-        ax_main.text(len(df) + 0.5, latest_pl, f" {safe_int(latest_pl)} ", color='black', backgroundcolor='#00ffff', fontsize=9.5, fontweight='bold')
+        ax_main.text(len(df) + 0.5, latest_ph, f" {safe_int(latest_ph)} ", color='black', backgroundcolor='#ffff00', fontsize=9, fontweight='bold')
+        ax_main.text(len(df) + 0.5, latest_pl, f" {safe_int(latest_pl)} ", color='black', backgroundcolor='#00ffff', fontsize=9, fontweight='bold')
 
         ax_main.set_xlim(-4, len(df) + 4)
         ax_main.set_ylim(df['Low'].min() * 0.90, df['High'].max() * 1.10)
@@ -336,8 +351,9 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Bakrie & 
         fig.text(0.88, 0.968, f"{tf_clean.upper()} {last_date_str}", color='#ffff00', fontsize=10, fontweight='bold', ha='right')
 
         sub_header = f"{sector_info}\nHigh:{safe_int(last_high)}   Low:{safe_int(last_low)}   Open:{safe_int(last_open)}   Volume:{format_large_number(last_vol)}   V1:{format_large_number(df['V1'].iloc[-1])}"
-        fig.text(0.01, 0.932, sub_header, color='#00ffff', fontsize=9.5)
+        fig.text(0.01, 0.932, sub_header, color='#00ffff', fontsize=9)
 
+        # Plot Subplot Bar Status
         for i in range(len(df)):
             c, o = df['Close'].iloc[i], df['Open'].iloc[i]
             bar_color = color_neutral if abs(c - o) / max(1, o) < 0.0005 else (color_up if c >= o else color_down)
@@ -345,20 +361,24 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Bakrie & 
         ax_bar.set_ylim(0, 1)
         ax_bar.axis('off')
 
+        # Subplot Volume VSA
         ax_vol.bar(x_indices, df['Vol_Sell'], color='#ff0000', width=0.8, align='center')
         ax_vol.bar(x_indices, df['Vol_Buy'], bottom=df['Vol_Sell'], color='#00ff00', width=0.8, align='center')
         ax_vol.plot(x_indices, df['V1'], color='#ffffff', linewidth=1.0, linestyle='-')
         
+        net_vol_str = format_large_number(net_vol_today, show_sign=True)
+        net_5d_str = format_large_number(net_5d_vol, show_sign=True)
         last_buy_pct = safe_int(buy_ratios[-1] * 100)
         vol_text = (f"Buy Percent = {last_buy_pct}%   Sell Percent = {100 - last_buy_pct}%   "
                     f"Net Vol = {net_vol_str}   Net 5D (Bandar 1W) = {net_5d_str}")
-        ax_vol.text(0.01, 0.88, vol_text, transform=ax_vol.transAxes, color='#00ffff', fontsize=9, fontweight='bold')
+        ax_vol.text(0.01, 0.88, vol_text, transform=ax_vol.transAxes, color='#00ffff', fontsize=8.5, fontweight='bold')
         ax_vol.set_ylim(0, df['Volume'].max() * 1.35)
 
+        # Subplot Market Maker (MM)
         mm_colors = ['#ffff00' if v >= 0 else '#555555' for v in df['MM']]
         ax_mm.bar(x_indices, df['MM'], color=mm_colors, width=0.4)
-        ax_mm.text(0.01, 0.85, "Market Maker", transform=ax_mm.transAxes, color='#ffff00', fontsize=9, fontweight='bold')
-        ax_mm.text(len(df) + 0.5, df['MM'].iloc[-1], f"{df['MM'].iloc[-1]:.4f}", color='black', backgroundcolor='#ffff00', fontsize=9, fontweight='bold')
+        ax_mm.text(0.01, 0.85, "Market Maker", transform=ax_mm.transAxes, color='#ffff00', fontsize=8.5, fontweight='bold')
+        ax_mm.text(len(df) + 0.5, df['MM'].iloc[-1], f"{df['MM'].iloc[-1]:.4f}", color='black', backgroundcolor='#ffff00', fontsize=8.5, fontweight='bold')
 
         step = max(1, len(df) // 8)
         ax_mm.set_xticks(x_indices[::step])
@@ -519,7 +539,6 @@ def auto_screener_loop():
 
             # 2. SCREENER BERKALA 5 MENIT (JALAN SAAT JAM BURSA)
             if is_market_open():
-                # A. Scan Sinyal Beli TF Daily (1d) Setiap 5 Menit
                 signals_daily = run_scan_process_custom_tf(timeframe="1d")
                 if signals_daily:
                     broadcast_screening_results(
@@ -528,7 +547,6 @@ def auto_screener_loop():
                         "1d"
                     )
 
-                # B. Scan Sinyal Beli TF 5M Setiap 5 Menit
                 signals_5m = run_scan_process_custom_tf(timeframe="5m")
                 if signals_5m:
                     broadcast_screening_results(
@@ -577,7 +595,7 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
     if timeframe in ['5', '5mi', 'm5']: timeframe = '5m'
     if timeframe in ['15', '15mi', 'm15']: timeframe = '15m'
 
-    send_reply(chat_id, f"📊 *Generating Chart {stock_code} ({timeframe.upper()})...*")
+    send_reply(chat_id, f"📊 *Generating Clean Chart {stock_code} ({timeframe.upper()})...*")
     df = fetch_stock_history_multi_tf(stock_code, timeframe=timeframe)
     
     if df is not None and not df.empty and len(df) >= 5:
@@ -601,7 +619,7 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
         out_file = f"chart_{stock_code}_{timeframe}.png"
         generate_pro_chart(df, symbol=stock_code, timeframe=timeframe, output_filename=out_file)
         
-        send_photo_reply(chat_id, out_file, caption=f"📊 *Chart {stock_code} ({timeframe.upper()}) — RAFANO TRADER Engine*")
+        send_photo_reply(chat_id, out_file, caption=f"📊 *Chart {stock_code} ({timeframe.upper()}) — Clean Dashboard Edition*")
         
         if os.path.exists(out_file):
             os.remove(out_file)
@@ -609,7 +627,7 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
         send_reply(chat_id, f"❌ Data saham `{stock_code}` tidak ditemukan.")
 
 def main():
-    print("🚀 Starting RAFANO TRADER Bot (Photo Engine & Signal Precision)...")
+    print("🚀 Starting RAFANO TRADER Bot (Clean Dashboard Engine)...")
     screener_thread = threading.Thread(target=auto_screener_loop, daemon=True)
     screener_thread.start()
 
@@ -649,7 +667,7 @@ def main():
                                 "⚡ `/screener` - Scan Sinyal Intraday Cepat (5M)\n"
                                 "🌅 `/sesi1` - Scan Sinyal Akhir Sesi 1 (15M)\n\n"
                                 "Format Perintah Chart:\n"
-                                "📈 `/c <KODE> <TIMEFRAME>` - Analisa Chart Setup VSA\n\n"
+                                "📈 `/c <KODE> <TIMEFRAME>` - Analisa Chart Setup Clean VSA\n\n"
                                 "Kontrol Auto-Screener:\n"
                                 "⏸️ `/pause` - Pause Auto Screener\n"
                                 "▶️ `/resume` - Resume Auto Screener"
@@ -665,7 +683,6 @@ def main():
                             SCREENER_ACTIVE = True
                             send_reply(chat_id, "▶️ *Auto Screener berhasil di-RESUME (Aktif).*")
 
-                        # PERINTAH KHUSUS MANUAL SCAN SINYAL BUY (DAILY 1D)
                         elif cmd in ["/buy", "/scanbuy"]:
                             send_reply(chat_id, "🔎 *Memulai pemindaian manual Sinyal BUY (Daily 1D) pada 300 Saham IHSG...*")
                             
