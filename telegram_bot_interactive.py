@@ -36,41 +36,45 @@ HEADERS = {
 
 SCREENER_ACTIVE = True
 
+# Daftar 300 Saham IHSG Aktif, Price > 50, Non-FCA, Non-Suspended
 TOP_300_IHSG = [
-    "ACES", "ADHI", "ADRO", "AGRO", "AGRS", "AHAP", "AISA", "AKRA", "ALDO", "AMAR", 
-    "AMFG", "AMMN", "AMRT", "ANDI", "ANJT", "ANTM", "APIC", "APLN", "ARCI", "ARTO", 
-    "ASGR", "ASII", "ASRI", "AUTO", "AVIA", "AXIO", "BABP", "BACA", "BALI", "BANK", 
-    "BAPA", "BBCA", "BBHI", "BBKP", "BBLD", "BBMD", "BBNI", "BBRI", "BBRM", "BBTN", 
-    "BBYB", "BCIC", "BDMN", "BEST", "BFIN", "BHIT", "BIPI", "BIPP", "BIRD", "BISI", 
-    "BJBR", "BJTM", "BKSL", "BMAS", "BMHS", "BMRI", "BMTR", "BNBR", "BNGA", "BNII", 
-    "BNLI", "BOLT", "BRAM", "BRMS", "BRPT", "BSDE", "BSIM", "BSSR", "BTON", "BUKA", 
-    "BULL", "BUMI", "BVIC", "BWPT", "BYAN", "CASA", "CASS", "CENT", "CFIN", "CINT", 
-    "CITA", "CITY", "CLPI", "CMNP", "CMPP", "CMRY", "CNTX", "COAL", "CPIN", "CPRI", 
-    "CPRO", "CSAP", "CSRA", "CTBN", "CTRA", "DART", "DDEI", "DEWA", "DGIK", "DIGI", 
-    "DILD", "DIVA", "DKFT", "DLTA", "DMAS", "DNAR", "DNET", "DOOID", "DPNS", "DSNG", 
-    "DUTI", "DVLA", "ECII", "ELSA", "ELTY", "EMTK", "ENRG", "ERAA", "ESSA", "FASW", 
-    "FILM", "FIRE", "FPNI", "FUTR", "GDST", "GEMS", "GIAA", "GJTL", "GNKF", "GOTO", 
-    "GPRA", "GRPH", "GSMF", "GTBO", "GWSA", "GZCO", "HATM", "HDIT", "HEAL", "HERO", 
-    "HEXA", "HITS", "HMSP", "HOKI", "HOME", "HOPE", "HRUM", "IATA", "IBFN", "IBOS", 
-    "ICBP", "ICON", "IDPR", "IGAR", "IIKP", "IKAI", "IKBI", "INAF", "INAI", "INCF", 
-    "INCI", "INDF", "INKP", "INPC", "INPP", "INTP", "IPCC", "IPPE", "IRRA", "ISAT", 
-    "ISSP", "ITMG", "JARR", "JECC", "JAST", "JIHD", "JKON", "JSPT", "JPFA", "JRPT", 
-    "JSMR", "JTEX", "KAEF", "KAST", "KBLI", "KBLM", "KDSI", "KIJA", "KKGI", "KLBF", 
-    "KMTR", "KOBX", "KOPI", "KPIG", "KRAS", "KREN", "LPCK", "LPKR", "LPLI", "LPPF", 
-    "LTLS", "MAHA", "MAPA", "MAPI", "MASB", "MBAP", "MBMA", "MBTO", "MCOR", "MDKA", 
-    "MMLP", "MNCN", "MPPA", "MRAT", "MSIN", "MTCEN", "MTDL", "MTLA", "MYOR", "NCKL", 
-    "NELI", "NICK", "NIKL", "NISP", "NSIC", "OASA", "OKAS", "OMRE", "PALM", "PANI", 
-    "PANR", "PBSD", "PBID", "PGLI", "PGAS", "PUDP", "PNBS", "PNIN", "PNLF", "POLI", 
-    "POLL", "POLY", "PORT", "POWR", "PPGL", "PPRE", "PTBA", "PTFO", "PTPP", "PTRO", 
-    "PWON", "PYFA", "RAJA", "RALS", "RANC", "RBMS", "RDTX", "RELI", "RICY", "RIGS", 
-    "ROTI", "SAFE", "SAMF", "SAME", "SAMR", "SBAT", "SCCO", "SCMA", "SDMU", "SFAN", 
-    "SGER", "SGRO", "SILO", "SIMP", "SINO", "SIPD", "SKLT", "SMAR", "SMDM", "SMDR", 
-    "SMGR", "SMRA", "SMOT", "SMSM", "SOCI", "SPTO", "SRIL", "SRTG", "SSIA", "SSMS", 
-    "STAA", "TAPG", "TBLA", "TBIG", "TEBE", "TFCO", "TINU", "TINS", "TKIM", "TLKM", 
-    "TMAS", "TOBA", "TPIA", "TRIM", "TRIS", "TRST", "TRUK", "TSPC", "TOTO", "UANG", 
-    "UCID", "ULTJ", "UNIC", "UNIQ", "UNTR", "UNVR", "VICI", "VINS", "VKTR", "VRNA", 
-    "WAPO", "WEGE", "WIFI", "WIIM", "WINS", "WIRT", "WOOD", "WSBP", "WSIH", "WSKT", 
-    "WTON", "YPAS", "YULE", "ZBRA", "ZINC"
+    "ACES", "ADHI", "ADMR", "ADRO", "AGRO", "AGRS", "AHAP", "AISA", "AKRA", "ALDO", 
+    "AMAR", "AMFG", "AMMM", "AMMN", "AMMS", "AMRT", "ANDI", "ANJT", "ANTM", "APEX", 
+    "APIC", "APLN", "ARCI", "ARKO", "ARTO", "ASBI", "ASGR", "ASHA", "ASII", "ASRI", 
+    "AUTO", "AVIA", "AXIO", "BABP", "BACA", "BALI", "BANK", "BAPA", "BBCA", "BBHI", 
+    "BBKP", "BBLD", "BBMD", "BBNI", "BBRI", "BBRM", "BBTN", "BBYB", "BCIC", "BDMN", 
+    "BEST", "BFIN", "BHIT", "BIKE", "BIPI", "BIPP", "BIRD", "BISI", "BJBR", "BJTM", 
+    "BKSL", "BLUE", "BMAS", "BMBL", "BMHS", "BMRI", "BMTR", "BNBR", "BNGA", "BNII", 
+    "BNLI", "BOLT", "BRAM", "BRMS", "BRPT", "BSDE", "BSIM", "BSSR", "BSWD", "BTEC", 
+    "BTON", "BUKA", "BULL", "BUMI", "BVIC", "BWPT", "BYAN", "CARE", "CARS", "CASA", 
+    "CASS", "CEKA", "CENT", "CFIN", "CINT", "CITA", "CITY", "CLPI", "CMNP", "CMPP", 
+    "CMRY", "CNTX", "COAL", "CPIN", "CPRI", "CPRO", "CRAB", "CSAP", "CSRA", "CTBN", 
+    "CTRA", "DART", "DEWA", "DGIK", "DIGI", "DILD", "DIVA", "DKFT", "DLTA", "DMAS", 
+    "DNAR", "DNET", "DPNS", "DRMA", "DSNG", "DUTI", "DVLA", "ECII", "ELSA", "ELTY", 
+    "EMTK", "ENRG", "ERAA", "ESSA", "FASW", "FILM", "FIRE", "FPNI", "FUTR", "GDST", 
+    "GEMS", "GIAA", "GJTL", "GNKF", "GOTO", "GPRA", "GRPH", "GSMF", "GTBO", "GWSA", 
+    "GZCO", "HAIS", "HATM", "HDIT", "HEAL", "HERO", "HEXA", "HILL", "HITS", "HMSP", 
+    "HOKI", "HOME", "HOPE", "HRUM", "IATA", "IBFN", "IBOS", "ICBP", "ICON", "IDPR", 
+    "IFSH", "IGAR", "IIKP", "IKAI", "IKBI", "IMPC", "INAF", "INAI", "INCF", "INCI", 
+    "INDF", "INKP", "INPC", "INPP", "INTP", "IPCC", "IPPE", "IRRA", "ISAT", "ISSP", 
+    "ITMG", "JARR", "JECC", "JAST", "JIHD", "JKON", "JSPT", "JPFA", "JRPT", "JSMR", 
+    "JTEX", "KAEF", "KAST", "KBLI", "KBLM", "KDSI", "KEEN", "KIJA", "KKGI", "KLBF", 
+    "KMDS", "KMTR", "KOBX", "KOPI", "KPIG", "KRAS", "LAJU", "LPCK", "LPKR", "LPLI", 
+    "LPPF", "LTLS", "MAHA", "MAPA", "MAPI", "MARK", "MASB", "MBAP", "MBMA", "MBTO", 
+    "MCOR", "MDKA", "MEDC", "MGRO", "MLPT", "MMLP", "MNCN", "MPOW", "MPPA", "MRAT", 
+    "MSIN", "MTDL", "MTLA", "MYOR", "NANO", "NCKL", "NELI", "NICK", "NIKL", "NISP", 
+    "NSIC", "OASA", "OKAS", "OMRE", "PALM", "PANI", "PANR", "PBSD", "PBID", "PGLI", 
+    "PGAS", "PGUN", "PMMP", "PUDP", "PNBS", "PNIN", "PNLF", "POLI", "POLL", "POLY", 
+    "PORT", "POWR", "PPGL", "PPRE", "PTBA", "PTPP", "PTRO", "PWON", "PYFA", "RAJA", 
+    "RALS", "RANC", "RBMS", "RDTX", "RELI", "RICY", "RIGS", "RMKO", "ROTI", "SAFE", 
+    "SAMF", "SAME", "SAMR", "SBAT", "SCCO", "SCMA", "SDMU", "SFAN", "SGER", "SGRO", 
+    "SILO", "SIMP", "SINO", "SIPD", "SKLT", "SMAR", "SMDM", "SMDR", "SMGR", "SMRA", 
+    "SMOT", "SMSM", "SOCI", "SPTO", "SRTG", "SSIA", "SSMS", "STAA", "TAPG", "TBLA", 
+    "TBIG", "TEBE", "TFCO", "TINU", "TINS", "TKIM", "TLDN", "TLKM", "TMAS", "TOBA", 
+    "TPIA", "TRIM", "TRIS", "TRST", "TRUK", "TSPC", "TOTO", "UANG", "UCID", "ULTJ", 
+    "UNIC", "UNIQ", "UNTR", "UNVR", "VICI", "VINS", "VKTR", "VRNA", "WAPO", "WEGE", 
+    "WIFI", "WIIM", "WINS", "WIRT", "WOOD", "WSBP", "WSIH", "WTON", "YPAS", "YULE", 
+    "ZBRA", "ZINC"
 ]
 
 # ==========================================
@@ -152,12 +156,79 @@ def calculate_vsa_metrics(df):
     df['Net_Vol_VSA'] = df['Vol_Buy'] - df['Vol_Sell']
     return df, buy_ratio
 
+def calculate_buy_signal_strength(df):
+    """
+    Menghitung skor kekuatan sinyal BUY (0-100%) berdasarkan 5 kriteria RAFANO TRADER.
+    """
+    if len(df) < 20:
+        return 0, "NO DATA"
+
+    last_row = df.iloc[-1]
+    last_close = last_row['Close']
+    last_open = last_row['Open']
+    last_vol = last_row['Volume']
+    avg_vol_v1 = last_row['V1']
+
+    df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
+    ema_50 = df['EMA50'].iloc[-1]
+
+    df, buy_ratios = calculate_vsa_metrics(df)
+    last_buy_ratio = buy_ratios[-1]
+    net_5d_vol = df['Net_Vol_VSA'].tail(5).sum()
+
+    score = 0
+    # 1. EMA 50 Major Trend (25%)
+    if last_close > ema_50:
+        score += 25
+
+    # 2. Volume Spike vs V1 (25%)
+    vol_multiple = last_vol / avg_vol_v1 if avg_vol_v1 > 0 else 0
+    if vol_multiple >= 2.0:
+        score += 25
+    elif vol_multiple >= 1.5:
+        score += 20
+    elif vol_multiple >= 1.2:
+        score += 15
+
+    # 3. VSA Buy Ratio (20%)
+    if last_buy_ratio >= 0.70:
+        score += 20
+    elif last_buy_ratio >= 0.60:
+        score += 15
+    elif last_buy_ratio >= 0.55:
+        score += 10
+
+    # 4. Net Vol Bandar 1W (20%)
+    if net_5d_vol > 0:
+        score += 20
+
+    # 5. Bullish Candle Direction (10%)
+    if last_close > last_open:
+        score += 10
+
+    # Label Status
+    if score >= 85:
+        label = "VERY STRONG 🚀"
+    elif score >= 70:
+        label = "STRONG BUY 🟩"
+    elif score >= 50:
+        label = "WEAK BUY 🟧"
+    else:
+        label = "NO SIGNAL 🟥"
+
+    return score, label
+
 def check_volume_spike_signal(df, symbol, threshold_multiplier=1.2, min_value_traded=500_000_000):
     if len(df) < 20:
         return False, {}
+    
     last_row = df.iloc[-1]
     last_close = last_row['Close']
     last_vol = last_row['Volume']
+
+    # FILTER UTAMA: Harga > 50 & Volume > 0
+    if last_close <= 50 or last_vol == 0:
+        return False, {}
 
     value_traded = last_close * last_vol
     if value_traded < min_value_traded:
@@ -168,24 +239,31 @@ def check_volume_spike_signal(df, symbol, threshold_multiplier=1.2, min_value_tr
     last_open = last_row['Open']
     last_buy_ratio = buy_ratios[-1]
     
-    # Memakai EMA 50 untuk sinyal tren utama
+    # Major Trend: EMA 50
     df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
     ema_50 = df['EMA50'].iloc[-1]
 
-    if (last_close > ema_50) and (last_vol >= (avg_vol_v1 * threshold_multiplier)) and (last_close > last_open) and (last_buy_ratio >= 0.55):
+    # Filter Akumulasi Bandar 1-Week (Net Volume 5 Hari > 0)
+    net_5d_vol = df['Net_Vol_VSA'].tail(5).sum()
+    is_bandar_accum = net_5d_vol > 0
+
+    if (last_close > ema_50) and (last_vol >= (avg_vol_v1 * threshold_multiplier)) and (last_close > last_open) and (last_buy_ratio >= 0.55) and is_bandar_accum:
         vol_multiple = last_vol / avg_vol_v1 if avg_vol_v1 > 0 else 0
         change_pct = ((last_close / df['Close'].iloc[-2]) - 1) * 100 if len(df) > 1 else 0.0
+        score, score_label = calculate_buy_signal_strength(df)
+
         return True, {
             "symbol": symbol, "close": safe_int(last_close), "change_pct": change_pct,
             "vol_multiple": vol_multiple, "buy_ratio": safe_int(last_buy_ratio * 100),
-            "volume": safe_int(last_vol), "value_traded": value_traded
+            "volume": safe_int(last_vol), "value_traded": value_traded,
+            "bandar_5d": net_5d_vol, "score": score, "score_label": score_label
         }
     return False, {}
 
 # ==========================================
-# ENGINE CHARTING WITH CLEAN DASHBOARD KANAN ATAS
+# ENGINE CHARTING WITH CLEAN DASHBOARD
 # ==========================================
-def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Bakrie & Brothers Tbk | Industrials", output_filename="chart_output.png"):
+def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industrial Sector | IHSG", output_filename="chart_output.png"):
     try:
         tf_clean = timeframe.lower().strip()
         is_intraday = tf_clean in ['1m', '5m', '15m', '30m', '1h']
@@ -213,6 +291,8 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Bakrie & 
         df, buy_ratios = calculate_vsa_metrics(df)
         net_5d_vol = df['Net_Vol_VSA'].tail(5).sum()
         net_vol_today = df['Net_Vol_VSA'].iloc[-1]
+        
+        signal_score, score_lbl = calculate_buy_signal_strength(df)
 
         if 'MM' not in df.columns:
             df['MM'] = (df['Close'] - df['EMA50']) / df['EMA50'] * 1000 + np.sin(np.linspace(0, 10, len(df))) * 15 - 10.9258
@@ -260,22 +340,22 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Bakrie & 
         ax_main.step(x_indices, df['Pivot_High'], where='mid', color='#555555', linestyle='--', linewidth=1.0)
         ax_main.step(x_indices, df['Pivot_Low'], where='mid', color='#444444', linestyle=':', linewidth=1.0)
 
-        # ==========================================
-        # 🎯 PENANDA SINYAL SIMPEL (TANPA MENUTUPI CHART)
-        # ==========================================
         last_signal_idx = -10
         latest_setup = {
             "status": "WAIT & SEE", "entry": 0, "tp1": 0, "tp2": 0, "danger": 0
         }
 
-        for i in range(2, len(df)):
+        for i in range(5, len(df)):
             c_price, o_price = df['Close'].iloc[i], df['Open'].iloc[i]
             vol_curr, vol_avg = df['Volume'].iloc[i], df['V1'].iloc[i]
             ema_50 = df['EMA50'].iloc[i]
             b_ratio = buy_ratios[i]
             atr_val = df['ATR'].iloc[i]
+            
+            net_5d_i = df['Net_Vol_VSA'].iloc[max(0, i-4):i+1].sum()
+            is_bandar_accum_i = net_5d_i > 0
 
-            is_accum_trend = (c_price > ema_50) and (c_price > o_price) and (vol_curr >= vol_avg * 1.0) and (b_ratio >= 0.55)
+            is_accum_trend = (c_price > 50) and (c_price > ema_50) and (c_price > o_price) and (vol_curr >= vol_avg * 1.0) and (b_ratio >= 0.55) and is_bandar_accum_i
 
             if is_accum_trend and (i - last_signal_idx >= 4):
                 buy_price = round_to_ihsg_fraction(c_price)
@@ -284,10 +364,8 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Bakrie & 
                 swing_low = df['Pivot_Low'].iloc[i]
                 danger_price = round_to_ihsg_fraction(min(swing_low, buy_price - (1.0 * atr_val)))
 
-                # Hanya plot panah hijau kecil tanpa teks besar yang menutupi candle
                 ax_main.plot(i, df['Low'].iloc[i] * 0.985, marker='^', color='#00ff00', markersize=7, zorder=6)
                 
-                # Sinyal Beli Pada Bar Terakhir
                 if i >= len(df) - 3:
                     ax_main.text(i, df['Low'].iloc[i] * 0.95, f"BUY @ {buy_price}", color='#00ff00', fontsize=8, fontweight='bold', ha='center',
                                  bbox=dict(boxstyle='round,pad=0.2', facecolor='#000000', alpha=0.9, edgecolor='#00ff00'))
@@ -301,30 +379,27 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Bakrie & 
                 }
                 last_signal_idx = i
 
-        # ==========================================
-        # 📋 DASHBOARD SIMPLE DI KANAN ATAS CHART
-        # ==========================================
+        # DASHBOARD KANAN ATAS (DENGAN INDIKATOR KEKUATAN SINYAL/SCORE)
         status_color = "#00ff00" if latest_setup["status"] == "BUY ACCUMULATION" else "#ffff00"
         
         dashboard_text = (
             f"   📊 RAFANO TRADER DASHBOARD   \n"
             f" ------------------------------- \n"
+            f" SCORE SIGNAL: {signal_score}% ({score_lbl})\n"
             f" STATUS     : {latest_setup['status']}\n"
             f" ENTRY      : {latest_setup['entry'] if latest_setup['entry'] > 0 else last_close}\n"
-            f" TP1        : {latest_setup['tp1'] if latest_setup['tp1'] > 0 else round_to_ihsg_fraction(last_close*1.035)}\n"
-            f" TP2        : {latest_setup['tp2'] if latest_setup['tp2'] > 0 else round_to_ihsg_fraction(last_close*1.07)}\n"
-            f" SL         : {latest_setup['danger'] if latest_setup['danger'] > 0 else round_to_ihsg_fraction(last_close*0.95)}\n"
+            f" TP1 (+3.5%): {latest_setup['tp1'] if latest_setup['tp1'] > 0 else round_to_ihsg_fraction(last_close*1.035)}\n"
+            f" TP2 (ATR)  : {latest_setup['tp2'] if latest_setup['tp2'] > 0 else round_to_ihsg_fraction(last_close*1.07)}\n"
+            f" DANGER / SL: {latest_setup['danger'] if latest_setup['danger'] > 0 else round_to_ihsg_fraction(last_close*0.95)}\n"
             f" ------------------------------- \n"
-            f" BANDAR 1W  : {'ACCUM' if net_5d_vol >= 0 else 'DISTRIB'}\n"
+            f" BANDAR 1W  : {'ACCUM (WAJIB)' if net_5d_vol > 0 else 'DISTRIB'}\n"
             f" NET VOL 1D : {format_large_number(net_vol_today, show_sign=True)}"
         )
         
-        # Posisikan kotak dashboard bersih di kanan atas
         ax_main.text(0.985, 0.95, dashboard_text, transform=ax_main.transAxes, verticalalignment='top', horizontalalignment='right',
                      fontfamily='monospace', fontsize=9, color=status_color,
                      bbox=dict(boxstyle='round,pad=0.5', facecolor='#000000', alpha=0.88, edgecolor='#444444'))
 
-        # Stat Tambahan Kiri Atas Sederhana
         stat_text_left = (
             f"Avg Price : {df['Close'].tail(5).mean():.1f}\n"
             f"VSA Buy   : {safe_int(buy_ratios[-1]*100)}%"
@@ -353,7 +428,6 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Bakrie & 
         sub_header = f"{sector_info}\nHigh:{safe_int(last_high)}   Low:{safe_int(last_low)}   Open:{safe_int(last_open)}   Volume:{format_large_number(last_vol)}   V1:{format_large_number(df['V1'].iloc[-1])}"
         fig.text(0.01, 0.932, sub_header, color='#00ffff', fontsize=9)
 
-        # Plot Subplot Bar Status
         for i in range(len(df)):
             c, o = df['Close'].iloc[i], df['Open'].iloc[i]
             bar_color = color_neutral if abs(c - o) / max(1, o) < 0.0005 else (color_up if c >= o else color_down)
@@ -361,7 +435,6 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Bakrie & 
         ax_bar.set_ylim(0, 1)
         ax_bar.axis('off')
 
-        # Subplot Volume VSA
         ax_vol.bar(x_indices, df['Vol_Sell'], color='#ff0000', width=0.8, align='center')
         ax_vol.bar(x_indices, df['Vol_Buy'], bottom=df['Vol_Sell'], color='#00ff00', width=0.8, align='center')
         ax_vol.plot(x_indices, df['V1'], color='#ffffff', linewidth=1.0, linestyle='-')
@@ -374,7 +447,6 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Bakrie & 
         ax_vol.text(0.01, 0.88, vol_text, transform=ax_vol.transAxes, color='#00ffff', fontsize=8.5, fontweight='bold')
         ax_vol.set_ylim(0, df['Volume'].max() * 1.35)
 
-        # Subplot Market Maker (MM)
         mm_colors = ['#ffff00' if v >= 0 else '#555555' for v in df['MM']]
         ax_mm.bar(x_indices, df['MM'], color=mm_colors, width=0.4)
         ax_mm.text(0.01, 0.85, "Market Maker", transform=ax_mm.transAxes, color='#ffff00', fontsize=8.5, fontweight='bold')
@@ -468,6 +540,8 @@ def run_scan_process_custom_tf(timeframe="5m"):
             res = f.result()
             if res:
                 detected_signals.append(res)
+    # Urutkan sinyal berdasarkan skor terbesar ke terkecil
+    detected_signals.sort(key=lambda x: x.get('score', 0), reverse=True)
     return detected_signals
 
 # ==========================================
@@ -476,7 +550,7 @@ def run_scan_process_custom_tf(timeframe="5m"):
 def broadcast_screening_results(signals, title_header, tf_code):
     now_str = datetime.datetime.now().strftime('%d %b %Y %H:%M WIB')
     if not signals:
-        send_reply(TARGET_CHAT_ID, f"ℹ️ *{title_header}*\n🕒 `{now_str}`\nTidak ditemukan emiten yang memenuhi kriteria Power Accumulation.")
+        send_reply(TARGET_CHAT_ID, f"ℹ️ *{title_header}*\n🕒 `{now_str}`\nTidak ditemukan emiten >Rp50 yang memenuhi kriteria Power Accumulation.")
         return
 
     header_msg = (
@@ -491,8 +565,9 @@ def broadcast_screening_results(signals, title_header, tf_code):
     for idx, item in enumerate(signals, 1):
         item_str = (
             f"{idx}. *{item['symbol']}* — Harga `{item['close']}` ({item['change_pct']:+.2f}%)\n"
-            f"    └ Vol Spike: `{item['vol_multiple']:.1f}x V1` | Buy Vol: `{item['buy_ratio']}%`\n"
-            f"    └ Value Traded: `{format_large_number(item['value_traded'])}`\n\n"
+            f"    ├ ⚡ *Buy Strength Score: {item['score']}%* ({item['score_label']})\n"
+            f"    ├ Vol Spike: `{item['vol_multiple']:.1f}x V1` | Buy Vol: `{item['buy_ratio']}%`\n"
+            f"    └ Bandar 1W: `{format_large_number(item['bandar_5d'], show_sign=True)}` (ACCUM)\n\n"
         )
         inline_keyboard.append([
             {"text": f"📈 {item['symbol']} (Daily)", "callback_data": f"chart_{item['symbol']}_1d"},
@@ -525,7 +600,6 @@ def auto_screener_loop():
             today_str, current_time_str = now.strftime('%Y-%m-%d'), now.strftime('%H:%M')
             weekday = now.weekday()
             
-            # 1. SCREENER KHUSUS (SESI 1 & END OF DAY)
             target_sesi1_time = "11:25" if weekday == 4 else "11:55"
             if weekday < 5 and current_time_str == target_sesi1_time and last_triggered_sesi1 != today_str:
                 signals_sesi1 = run_scan_process_custom_tf(timeframe="15m")
@@ -537,7 +611,6 @@ def auto_screener_loop():
                 broadcast_screening_results(signals_eod, "POWER ACCUMULATION VSA — END OF DAY (DAILY)", "1d")
                 last_triggered_eod = today_str
 
-            # 2. SCREENER BERKALA 5 MENIT (JALAN SAAT JAM BURSA)
             if is_market_open():
                 signals_daily = run_scan_process_custom_tf(timeframe="1d")
                 if signals_daily:
@@ -624,10 +697,10 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
         if os.path.exists(out_file):
             os.remove(out_file)
     else:
-        send_reply(chat_id, f"❌ Data saham `{stock_code}` tidak ditemukan.")
+        send_reply(chat_id, f"❌ Data saham `{stock_code}` tidak ditemukan / tidak aktif.")
 
 def main():
-    print("🚀 Starting RAFANO TRADER Bot (Clean Dashboard Engine)...")
+    print("🚀 Starting RAFANO TRADER Bot (Strict 300 Stock Universe with Signal Strength Score)...")
     screener_thread = threading.Thread(target=auto_screener_loop, daemon=True)
     screener_thread.start()
 
@@ -684,7 +757,7 @@ def main():
                             send_reply(chat_id, "▶️ *Auto Screener berhasil di-RESUME (Aktif).*")
 
                         elif cmd in ["/buy", "/scanbuy"]:
-                            send_reply(chat_id, "🔎 *Memulai pemindaian manual Sinyal BUY (Daily 1D) pada 300 Saham IHSG...*")
+                            send_reply(chat_id, "🔎 *Memulai pemindaian manual Sinyal BUY (Sorted by Score)...*")
                             
                             def manual_buy_job(c_id):
                                 start_t = time.time()
@@ -712,7 +785,7 @@ def main():
                             if len(parts) > 1:
                                 stock_code = parts[1].upper()
                                 timeframe = parts[2].lower() if len(parts) > 2 else "1d"
-                                threading.Thread(target=process_chart_request, args=(chat_id, stock_code, timeframe), daemon=True).start()
+                                threading.Thread(target=process_chart_request, args=(c_id, stock_code, timeframe), daemon=True).start()
                             else:
                                 send_reply(chat_id, "⚠️ Gunakan format: `/c <KODE> <TIMEFRAME>`\nContoh: `/c ANTM 1d`")
 
