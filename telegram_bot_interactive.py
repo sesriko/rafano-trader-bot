@@ -264,7 +264,7 @@ def check_volume_spike_signal(df, symbol, threshold_multiplier=1.2, min_value_tr
     return False, {}
 
 # ==========================================
-# CHART GENERATOR WITH FIXED POSITIONS
+# CHART GENERATOR WITH HIGH DPI (300)
 # ==========================================
 def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industrial Sector | IHSG", output_filename="chart_output.png"):
     try:
@@ -443,7 +443,15 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
         plt.setp(ax_main.get_xticklabels(), visible=False)
         plt.setp(ax_vol.get_xticklabels(), visible=False)
 
-        plt.savefig(output_filename, dpi=180, bbox_inches='tight', facecolor=fig.get_facecolor())
+        # PENINGKATAN RESOLUSI DENGAN DPI=300 & OPTIMASI LOSSLESS
+        plt.savefig(
+            output_filename, 
+            dpi=300, 
+            bbox_inches='tight', 
+            facecolor=fig.get_facecolor(),
+            format='png',
+            pil_kwargs={'optimize': True}
+        )
         return output_filename
     finally:
         plt.clf()
@@ -526,7 +534,7 @@ def run_scan_process_custom_tf(timeframe="5m"):
     return detected_signals
 
 # ==========================================
-# TELEGRAM SCHEDULER & BROADCASTER
+# TELEGRAM SCHEDULER & BROADCASTER (UNCOMPRESSED)
 # ==========================================
 def send_reply(chat_id, text, reply_markup=None):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -539,17 +547,18 @@ def send_reply(chat_id, text, reply_markup=None):
         print(f"❌ Error Send Message: {e}")
 
 def send_photo_reply(chat_id, photo_path, caption=""):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+    # Pengiriman menggunakan sendDocument agar terbebas dari kompresi otomatis Telegram
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
     try:
         with open(photo_path, 'rb') as photo:
             requests.post(
                 url, 
                 data={'chat_id': chat_id, 'caption': caption, 'parse_mode': 'Markdown'}, 
-                files={'photo': photo}, 
+                files={'document': photo}, 
                 timeout=30
             )
     except Exception as e:
-        print(f"❌ Error Send Photo: {e}")
+        print(f"❌ Error Send Document: {e}")
 
 def broadcast_screening_results(signals, title_header, tf_code, target_chat_id=None):
     if target_chat_id is None:
@@ -594,7 +603,7 @@ def broadcast_screening_results(signals, title_header, tf_code, target_chat_id=N
         send_reply(target_chat_id, current_msg, reply_markup={"inline_keyboard": inline_keyboard})
 
 def auto_screener_loop():
-    print("🚀 Auto Scheduled Screener Engine Active (60m Cooldown Filter Enabled)...")
+    print("🚀 Auto Scheduled Screener Engine Active (60m Cooldown & High Quality DPI Enabled)...")
     global SCREENER_ACTIVE
     last_triggered_sesi1, last_triggered_eod = "", ""
     
@@ -650,7 +659,7 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
     if timeframe in ['5', '5mi', 'm5']: timeframe = '5m'
     if timeframe in ['15', '15mi', 'm15']: timeframe = '15m'
 
-    send_reply(chat_id, f"📊 *Generating Clean Chart {stock_code} ({timeframe.upper()})...*")
+    send_reply(chat_id, f"📊 *Generating High-Res Chart {stock_code} ({timeframe.upper()})...*")
     df = fetch_stock_history_multi_tf(stock_code, timeframe=timeframe)
     
     if df is not None and not df.empty and len(df) >= 5:
@@ -674,7 +683,7 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
         out_file = f"chart_{stock_code}_{timeframe}.png"
         generate_pro_chart(df, symbol=stock_code, timeframe=timeframe, output_filename=out_file)
         
-        send_photo_reply(chat_id, out_file, caption=f"📊 *Chart {stock_code} ({timeframe.upper()}) — Clean Dashboard Edition*")
+        send_photo_reply(chat_id, out_file, caption=f"📊 *Chart {stock_code} ({timeframe.upper()}) — Ultra HD Edition*")
         
         if os.path.exists(out_file):
             os.remove(out_file)
