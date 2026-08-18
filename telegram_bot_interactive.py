@@ -4,6 +4,7 @@ import logging
 import datetime
 import threading
 import requests
+import pytz
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -17,6 +18,14 @@ except ImportError:
     yf = None
 
 # ==========================================
+# KONFIGURASI ZONA WAKTU (WIB)
+# ==========================================
+TIMEZONE_WIB = pytz.timezone('Asia/Jakarta')
+
+def get_now_wib():
+    return datetime.datetime.now(TIMEZONE_WIB)
+
+# ==========================================
 # FILTER LOGS TERMINAL
 # ==========================================
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
@@ -26,8 +35,6 @@ logging.getLogger("urllib3").setLevel(logging.CRITICAL)
 # KONFIGURASI BOT TELEGRAM & API
 # ==========================================
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8833563003:AAGSx750u_QXWpr91sd3yuD6LcnMXtWWrxQ")
-
-# Chat ID Utama untuk menerima sinyal Auto-Screener Otomatis (Ganti dengan ID Grup/Channel Anda, cth: -100xxxxxxxxx)
 TARGET_CHAT_ID = os.getenv("TARGET_CHAT_ID", "5660874676")
 
 ARJUM_API_BASE_URL = "https://stock.arjum.com/api"
@@ -118,7 +125,7 @@ def format_large_number(val, show_sign=False):
         return f"{sign}{val:,.0f}"
 
 def is_market_open():
-    now = datetime.datetime.now()
+    now = get_now_wib()
     weekday = now.weekday()
     if weekday >= 5:
         return False
@@ -366,7 +373,7 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
         fig.text(0.01, 0.968, f"{symbol} :   {safe_int(last_close)} ({change_pct:+.2f}%)", color=title_color, fontsize=16, fontweight='bold')
         fig.text(0.45, 0.968, "RAFANO TRADER", color='#ffffff', fontsize=16, fontweight='bold')
         
-        last_date_str = df.index[-1].strftime('%d %b %Y') if isinstance(df.index, pd.DatetimeIndex) else datetime.datetime.now().strftime('%d %b %Y')
+        last_date_str = get_now_wib().strftime('%d %b %Y')
         fig.text(0.88, 0.968, f"{tf_clean.upper()} {last_date_str}", color='#ffff00', fontsize=10, fontweight='bold', ha='right')
 
         sub_header = f"{sector_info}\nHigh:{safe_int(last_high)}   Low:{safe_int(last_low)}   Open:{safe_int(last_open)}   Volume:{format_large_number(last_vol)}   V1:{format_large_number(df['V1'].iloc[-1])}"
@@ -514,11 +521,10 @@ def send_photo_reply(chat_id, photo_path, caption=""):
         print(f"❌ Error Send Photo: {e}")
 
 def broadcast_screening_results(signals, title_header, tf_code, target_chat_id=None):
-    # Jika target_chat_id tidak diisi (misal dari Auto Screener background), gunakan TARGET_CHAT_ID utama
     if target_chat_id is None:
         target_chat_id = TARGET_CHAT_ID
 
-    now_str = datetime.datetime.now().strftime('%d %b %Y %H:%M WIB')
+    now_str = get_now_wib().strftime('%d %b %Y %H:%M WIB')
     if not signals:
         send_reply(target_chat_id, f"ℹ️ *{title_header}*\n🕒 `{now_str}`\nTidak ditemukan emiten >Rp50 yang memenuhi kriteria Power Accumulation.")
         return
@@ -556,7 +562,7 @@ def broadcast_screening_results(signals, title_header, tf_code, target_chat_id=N
         send_reply(target_chat_id, current_msg, reply_markup={"inline_keyboard": inline_keyboard})
 
 def auto_screener_loop():
-    print("🚀 Auto Scheduled Screener Engine Active...")
+    print("🚀 Auto Scheduled Screener Engine Active (WIB Timezone Locked)...")
     global SCREENER_ACTIVE
     last_triggered_sesi1, last_triggered_eod = "", ""
     
@@ -566,18 +572,18 @@ def auto_screener_loop():
                 time.sleep(10)
                 continue
 
-            now = datetime.datetime.now()
+            now = get_now_wib()
             today_str, current_time_str = now.strftime('%Y-%m-%d'), now.strftime('%H:%M')
             weekday = now.weekday()
             
-            # Sesi 1 Scheduler
+            # Sesi 1 Scheduler (WIB)
             target_sesi1_time = "11:25" if weekday == 4 else "11:55"
             if weekday < 5 and current_time_str == target_sesi1_time and last_triggered_sesi1 != today_str:
                 signals_sesi1 = run_scan_process_custom_tf(timeframe="15m")
                 broadcast_screening_results(signals_sesi1, "POWER ACCUMULATION VSA — AKHIR SESI 1 (15M)", "15m")
                 last_triggered_sesi1 = today_str
 
-            # End of Day Scheduler
+            # End of Day Scheduler (WIB)
             if weekday < 5 and current_time_str == "15:55" and last_triggered_eod != today_str:
                 signals_eod = run_scan_process_custom_tf(timeframe="1d")
                 broadcast_screening_results(signals_eod, "POWER ACCUMULATION VSA — END OF DAY (DAILY)", "1d")
@@ -629,12 +635,11 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
                 df['Date'] = pd.to_datetime(df['Date'])
             df.set_index('Date', inplace=True)
         elif not isinstance(df.index, pd.DatetimeIndex):
-            df.index = pd.date_range(end=pd.Timestamp.now(), periods=len(df), freq='D' if timeframe == '1d' else '5min')
+            df.index = pd.date_range(end=get_now_wib(), periods=len(df), freq='D' if timeframe == '1d' else '5min')
 
         out_file = f"chart_{stock_code}_{timeframe}.png"
         generate_pro_chart(df, symbol=stock_code, timeframe=timeframe, output_filename=out_file)
         
-        # Kirim balasan gambar chart langsung ke chat_id tempat perintah berasal
         send_photo_reply(chat_id, out_file, caption=f"📊 *Chart {stock_code} ({timeframe.upper()}) — Clean Dashboard Edition*")
         
         if os.path.exists(out_file):
@@ -646,7 +651,7 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
 # MAIN BOT TELEGRAM
 # ==========================================
 def main():
-    print("🚀 Starting RAFANO TRADER Bot (Auto to Target ID, Manual to Source Chat)...")
+    print("🚀 Starting RAFANO TRADER Bot (Auto-Timezone: WIB/UTC+7 Connected)...")
     screener_thread = threading.Thread(target=auto_screener_loop, daemon=True)
     screener_thread.start()
 
@@ -660,99 +665,67 @@ def main():
                 for update in res["result"]:
                     last_update_id = update["update_id"]
 
-                    # Handling Inline Keyboard Button (Klik Chart di List)
+                    # Handling Callback Query (Klik tombol inline chart)
                     if "callback_query" in update:
                         cb = update["callback_query"]
-                        cb_id, cb_data = cb["id"], cb["data"]
+                        cb_id = cb["id"]
+                        cb_data = cb.get("data", "")
                         c_id = cb["message"]["chat"]["id"]
-                        requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery", json={"callback_query_id": cb_id})
+
+                        try:
+                            requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery", json={"callback_query_id": cb_id})
+                        except Exception:
+                            pass
 
                         if cb_data.startswith("chart_"):
                             parts = cb_data.split("_")
-                            threading.Thread(target=process_chart_request, args=(c_id, parts[1], parts[2]), daemon=True).start()
+                            if len(parts) >= 3:
+                                symbol = parts[1]
+                                tf = parts[2]
+                                threading.Thread(target=process_chart_request, args=(c_id, symbol, tf), daemon=True).start()
 
-                    # Handling Perintah Manual Teks
+                    # Handling Chat Messages (Command)
                     elif "message" in update and "text" in update["message"]:
-                        chat_id = update["message"]["chat"]["id"]
-                        text_msg = update["message"]["text"].strip()
-                        parts = text_msg.split()
-                        cmd = parts[0].lower()
+                        msg = update["message"]
+                        c_id = msg["chat"]["id"]
+                        text = msg["text"].strip()
 
-                        if cmd in ["/start", "/help"]:
-                            welcome_msg = (
-                                "🤖 *RAFANO TRADER BOT*\n"
-                                "========================================\n"
-                                "Perintah Screener Manual:\n"
-                                "🟢 `/buy` atau `/scanbuy` - Scan Sinyal BUY Daily (1D)\n"
-                                "🌆 `/eod` - Scan Sinyal End of Day (Daily 1D)\n"
-                                "⚡ `/screener` - Scan Sinyal Intraday Cepat (5M)\n"
-                                "🌅 `/sesi1` - Scan Sinyal Akhir Sesi 1 (15M)\n\n"
-                                "Format Perintah Chart:\n"
-                                "📈 `/c <KODE> <TIMEFRAME>` - Analisa Chart Setup Clean VSA\n\n"
-                                "Kontrol Auto-Screener Otomatis:\n"
-                                "⏸️ `/pause` - Pause Auto Screener\n"
-                                "▶️ `/resume` - Resume Auto Screener"
+                        if text.lower() in ["/start", "/help"]:
+                            help_msg = (
+                                "🤖 *RAFANO TRADER BOT COMMANDS*\n\n"
+                                "• `/scan` or `/screen` : Run real-time screening across Top 300 IHSG\n"
+                                "• `/c TICKER [TF]` : Generate chart (e.g., `/c ANTM 1d` or `/c BBCA 5m`)\n"
+                                "• `/screener_on` : Enable auto screener background task\n"
+                                "• `/screener_off` : Disable auto screener background task"
                             )
-                            send_reply(chat_id, welcome_msg)
+                            send_reply(c_id, help_msg)
 
-                        elif cmd == "/pause":
+                        elif text.lower() in ["/scan", "/screen"]:
+                            send_reply(c_id, "🔍 *Running manual scan on Top 300 IHSG... Please wait.*")
+                            def manual_scan(target_id):
+                                sigs = run_scan_process_custom_tf("1d")
+                                broadcast_screening_results(sigs, "MANUAL SCREENING — DAILY (1D)", "1d", target_chat_id=target_id)
+                            threading.Thread(target=manual_scan, args=(c_id,), daemon=True).start()
+
+                        elif text.lower().startswith("/c ") or text.lower().startswith("/chart "):
+                            parts = text.split()
+                            if len(parts) >= 2:
+                                symbol = parts[1].upper()
+                                tf = parts[2].lower() if len(parts) >= 3 else "1d"
+                                threading.Thread(target=process_chart_request, args=(c_id, symbol, tf), daemon=True).start()
+
+                        elif text.lower() == "/screener_on":
                             global SCREENER_ACTIVE
-                            SCREENER_ACTIVE = False
-                            send_reply(chat_id, "⏸️ *Auto Screener berhasil di-PAUSE.*")
-
-                        elif cmd == "/resume":
                             SCREENER_ACTIVE = True
-                            send_reply(chat_id, "▶️ *Auto Screener berhasil di-RESUME (Aktif).*")
+                            send_reply(c_id, "✅ Auto-screener activated.")
 
-                        elif cmd in ["/buy", "/scanbuy"]:
-                            send_reply(chat_id, "🔎 *Memulai pemindaian manual Sinyal BUY (Sorted by Score)...*")
-                            
-                            def manual_buy_job(c_id):
-                                start_t = time.time()
-                                signals = run_scan_process_custom_tf(timeframe="1d")
-                                elapsed = time.time() - start_t
-                                # Kirim hasil ke c_id (chat tempat perintah diketik)
-                                broadcast_screening_results(
-                                    signals, 
-                                    f"MANUAL SCREENER — DAILY (1D) BUY ACCUMULATION ({elapsed:.1f}s)", 
-                                    "1d", 
-                                    target_chat_id=c_id
-                                )
-
-                            threading.Thread(target=manual_buy_job, args=(chat_id,), daemon=True).start()
-
-                        elif cmd in ["/sesi1", "/eod", "/screener", "/screen"]:
-                            tf_target = "15m" if cmd == "/sesi1" else ("1d" if cmd == "/eod" else "5m")
-                            title_lbl = "SESI 1 (15M)" if cmd == "/sesi1" else ("END OF DAY (1D)" if cmd == "/eod" else "INTRADAY (5M)")
-
-                            send_reply(chat_id, f"🔎 *Memulai pemindaian VSA {title_lbl} pada 300 Saham IHSG...*")
-                            
-                            def manual_screener_job(c_id, tf, label):
-                                start_t = time.time()
-                                signals = run_scan_process_custom_tf(timeframe=tf)
-                                elapsed = time.time() - start_t
-                                # Kirim hasil ke c_id (chat tempat perintah diketik)
-                                broadcast_screening_results(
-                                    signals, 
-                                    f"MANUAL SCREENER VSA — {label} ({elapsed:.1f}s)", 
-                                    tf, 
-                                    target_chat_id=c_id
-                                )
-
-                            threading.Thread(target=manual_screener_job, args=(chat_id, tf_target, title_lbl), daemon=True).start()
-
-                        elif cmd in ["/c", "/chart", "/bro"]:
-                            if len(parts) > 1:
-                                stock_code = parts[1].upper()
-                                timeframe = parts[2].lower() if len(parts) > 2 else "1d"
-                                # Kirim gambar chart ke chat_id tempat perintah diketik
-                                threading.Thread(target=process_chart_request, args=(chat_id, stock_code, timeframe), daemon=True).start()
-                            else:
-                                send_reply(chat_id, "⚠️ Gunakan format: `/c <KODE> <TIMEFRAME>`\nContoh: `/c ANTM 1d`")
+                        elif text.lower() == "/screener_off":
+                            SCREENER_ACTIVE = False
+                            send_reply(c_id, "⚠️ Auto-screener deactivated.")
 
         except Exception as e:
-            print(f"⚠️ Exception in Main Loop: {e}")
-            time.sleep(5)
+            print(f"⚠️ Exception in Telegram Polling: {e}")
+            time.sleep(3)
 
 if __name__ == "__main__":
     main()
