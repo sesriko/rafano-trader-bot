@@ -44,6 +44,35 @@ HEADERS = {
 
 SCREENER_ACTIVE = True
 
+# ==========================================
+# COOLDOWN TRACKER (60 MENIT)
+# ==========================================
+LAST_SENT_SIGNALS = {}
+COOLDOWN_SECONDS = 3600  # 60 Menit Jeda
+LAST_RESET_DATE = ""
+
+def filter_signals_with_cooldown(signals):
+    global LAST_RESET_DATE, LAST_SENT_SIGNALS
+    current_time = time.time()
+    today_str = get_now_wib().strftime('%Y-%m-%d')
+
+    # Reset cache cooldown setiap pergantian hari
+    if LAST_RESET_DATE != today_str:
+        LAST_SENT_SIGNALS.clear()
+        LAST_RESET_DATE = today_str
+
+    filtered_list = []
+    for sig in signals:
+        sym = sig['symbol']
+        last_sent = LAST_SENT_SIGNALS.get(sym, 0)
+
+        # Kirim jika belum pernah dikirim ATAU sudah lewat 60 menit
+        if (current_time - last_sent) >= COOLDOWN_SECONDS:
+            filtered_list.append(sig)
+            LAST_SENT_SIGNALS[sym] = current_time
+
+    return filtered_list
+
 # Universe 300 Saham IHSG
 TOP_300_IHSG = [
     "ACES", "ADHI", "ADMR", "ADRO", "AGRO", "AGRS", "AHAP", "AISA", "AKRA", "ALDO", 
@@ -169,9 +198,7 @@ def calculate_buy_signal_strength(df):
         return 0, "NO DATA"
 
     last_row = df.iloc[-1]
-    last_close = last_row['Close']
-    last_open = last_row['Open']
-    last_vol = last_row['Volume']
+    last_close, last_open, last_vol = last_row['Close'], last_row['Open'], last_row['Volume']
     avg_vol_v1 = last_row['V1']
 
     df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
@@ -237,7 +264,7 @@ def check_volume_spike_signal(df, symbol, threshold_multiplier=1.2, min_value_tr
     return False, {}
 
 # ==========================================
-# CHART GENERATOR WITH DASHBOARD
+# CHART GENERATOR WITH FIXED POSITIONS
 # ==========================================
 def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industrial Sector | IHSG", output_filename="chart_output.png"):
     try:
@@ -286,6 +313,7 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
 
         x_indices = np.arange(len(df))
 
+        # Render Candlestick
         for i in range(len(df)):
             open_p, high_p, low_p, close_p = df['Open'].iloc[i], df['High'].iloc[i], df['Low'].iloc[i], df['Close'].iloc[i]
             if close_p >= open_p:
@@ -330,54 +358,58 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
 
                 ax_main.plot(i, df['Low'].iloc[i] * 0.985, marker='^', color='#00ff00', markersize=7, zorder=6)
                 if i >= len(df) - 3:
-                    ax_main.text(i, df['Low'].iloc[i] * 0.95, f"BUY @ {buy_price}", color='#00ff00', fontsize=8, fontweight='bold', ha='center',
-                                 bbox=dict(boxstyle='round,pad=0.2', facecolor='#000000', alpha=0.9, edgecolor='#00ff00'))
+                    ax_main.text(i, df['Low'].iloc[i] * 0.96, f"BUY @ {buy_price}", color='#00ff00', fontsize=8, fontweight='bold', ha='center',
+                                 bbox=dict(boxstyle='round,pad=0.2', facecolor='#000000', alpha=0.75, edgecolor='#00ff00'))
 
                 latest_setup = {"status": "BUY ACCUMULATION", "entry": buy_price, "tp1": tp1_price, "tp2": tp2_price, "danger": danger_price}
                 last_signal_idx = i
 
+        # Margins & Position Settings
+        max_high = df['High'].max()
+        min_low = df['Low'].min()
+        ax_main.set_ylim(min_low * 0.95, max_high * 1.25)
+        ax_main.set_xlim(-4, len(df) + 8)
+
         status_color = "#00ff00" if latest_setup["status"] == "BUY ACCUMULATION" else "#ffff00"
         dashboard_text = (
-            f"   📊 RAFANO TRADER DASHBOARD   \n"
-            f" ------------------------------- \n"
-            f" SCORE SIGNAL: {signal_score}% ({score_lbl})\n"
-            f" STATUS     : {latest_setup['status']}\n"
-            f" ENTRY      : {latest_setup['entry'] if latest_setup['entry'] > 0 else last_close}\n"
-            f" TP1 (+3.5%): {latest_setup['tp1'] if latest_setup['tp1'] > 0 else round_to_ihsg_fraction(last_close*1.035)}\n"
-            f" TP2 (ATR)  : {latest_setup['tp2'] if latest_setup['tp2'] > 0 else round_to_ihsg_fraction(last_close*1.07)}\n"
-            f" DANGER / SL: {latest_setup['danger'] if latest_setup['danger'] > 0 else round_to_ihsg_fraction(last_close*0.95)}\n"
-            f" ------------------------------- \n"
-            f" BANDAR 1W  : {'ACCUM (WAJIB)' if net_5d_vol > 0 else 'DISTRIB'}\n"
-            f" NET VOL 1D : {format_large_number(net_vol_today, show_sign=True)}"
+            f" 📊 RAFANO TRADER DASHBOARD\n"
+            f" -------------------------\n"
+            f" SCORE : {signal_score}% ({score_lbl})\n"
+            f" STATUS: {latest_setup['status']}\n"
+            f" ENTRY : {latest_setup['entry'] if latest_setup['entry'] > 0 else last_close}\n"
+            f" TP1   : {latest_setup['tp1'] if latest_setup['tp1'] > 0 else round_to_ihsg_fraction(last_close*1.035)}\n"
+            f" TP2   : {latest_setup['tp2'] if latest_setup['tp2'] > 0 else round_to_ihsg_fraction(last_close*1.07)}\n"
+            f" SL    : {latest_setup['danger'] if latest_setup['danger'] > 0 else round_to_ihsg_fraction(last_close*0.95)}"
         )
         
-        ax_main.text(0.985, 0.95, dashboard_text, transform=ax_main.transAxes, verticalalignment='top', horizontalalignment='right',
-                     fontfamily='monospace', fontsize=9, color=status_color,
-                     bbox=dict(boxstyle='round,pad=0.5', facecolor='#000000', alpha=0.88, edgecolor='#444444'))
+        ax_main.text(0.015, 0.96, dashboard_text, transform=ax_main.transAxes, verticalalignment='top', horizontalalignment='left',
+                     fontfamily='monospace', fontsize=8.5, color=status_color,
+                     bbox=dict(boxstyle='round,pad=0.4', facecolor='#000000', alpha=0.70, edgecolor='#333333'))
 
-        stat_text_left = (f"Avg Price : {df['Close'].tail(5).mean():.1f}\nVSA Buy   : {safe_int(buy_ratios[-1]*100)}%")
-        ax_main.text(0.015, 0.95, stat_text_left, transform=ax_main.transAxes, verticalalignment='top',
-                     fontfamily='monospace', fontsize=9, color='#00ffff',
-                     bbox=dict(boxstyle='square,pad=0.3', facecolor='#000000', alpha=0.8, edgecolor='#222222'))
+        stat_text_right = (
+            f"BANDAR 1W : {'ACCUM' if net_5d_vol > 0 else 'DISTRIB'}\n"
+            f"NET VOL 1D: {format_large_number(net_vol_today, show_sign=True)}\n"
+            f"VSA BUY   : {safe_int(buy_ratios[-1]*100)}%"
+        )
+        ax_main.text(0.985, 0.96, stat_text_right, transform=ax_main.transAxes, verticalalignment='top', horizontalalignment='right',
+                     fontfamily='monospace', fontsize=8.5, color='#00ffff',
+                     bbox=dict(boxstyle='round,pad=0.4', facecolor='#000000', alpha=0.70, edgecolor='#333333'))
 
         latest_ph, latest_pl = df['Pivot_High'].iloc[-1], df['Pivot_Low'].iloc[-1]
-        ax_main.text(len(df) + 0.5, latest_ph, f" {safe_int(latest_ph)} ", color='black', backgroundcolor='#ffff00', fontsize=9, fontweight='bold')
-        ax_main.text(len(df) + 0.5, latest_pl, f" {safe_int(latest_pl)} ", color='black', backgroundcolor='#00ffff', fontsize=9, fontweight='bold')
-
-        ax_main.set_xlim(-4, len(df) + 4)
-        ax_main.set_ylim(df['Low'].min() * 0.90, df['High'].max() * 1.10)
+        ax_main.text(len(df) + 0.5, latest_ph, f" {safe_int(latest_ph)} ", color='black', backgroundcolor='#ffff00', fontsize=8.5, fontweight='bold')
+        ax_main.text(len(df) + 0.5, latest_pl, f" {safe_int(latest_pl)} ", color='black', backgroundcolor='#00ffff', fontsize=8.5, fontweight='bold')
 
         change_pct = ((last_close / df['Close'].iloc[-2]) - 1) * 100 if len(df) > 1 else 0.0
         title_color = '#ffff00' if change_pct >= 0 else '#ff0000'
         
-        fig.text(0.01, 0.968, f"{symbol} :   {safe_int(last_close)} ({change_pct:+.2f}%)", color=title_color, fontsize=16, fontweight='bold')
-        fig.text(0.45, 0.968, "RAFANO TRADER", color='#ffffff', fontsize=16, fontweight='bold')
+        fig.text(0.01, 0.975, f"{symbol} : {safe_int(last_close)} ({change_pct:+.2f}%)", color=title_color, fontsize=15, fontweight='bold')
+        fig.text(0.45, 0.975, "RAFANO TRADER", color='#ffffff', fontsize=15, fontweight='bold')
         
         last_date_str = get_now_wib().strftime('%d %b %Y')
-        fig.text(0.88, 0.968, f"{tf_clean.upper()} {last_date_str}", color='#ffff00', fontsize=10, fontweight='bold', ha='right')
+        fig.text(0.88, 0.975, f"{tf_clean.upper()} {last_date_str}", color='#ffff00', fontsize=10, fontweight='bold', ha='right')
 
-        sub_header = f"{sector_info}\nHigh:{safe_int(last_high)}   Low:{safe_int(last_low)}   Open:{safe_int(last_open)}   Volume:{format_large_number(last_vol)}   V1:{format_large_number(df['V1'].iloc[-1])}"
-        fig.text(0.01, 0.932, sub_header, color='#00ffff', fontsize=9)
+        sub_header = f"{sector_info} | High:{safe_int(last_high)} Low:{safe_int(last_low)} Vol:{format_large_number(last_vol)}"
+        fig.text(0.01, 0.945, sub_header, color='#888888', fontsize=8.5)
 
         for i in range(len(df)):
             c, o = df['Close'].iloc[i], df['Open'].iloc[i]
@@ -393,15 +425,14 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
         net_vol_str = format_large_number(net_vol_today, show_sign=True)
         net_5d_str = format_large_number(net_5d_vol, show_sign=True)
         last_buy_pct = safe_int(buy_ratios[-1] * 100)
-        vol_text = (f"Buy Percent = {last_buy_pct}%   Sell Percent = {100 - last_buy_pct}%   "
-                    f"Net Vol = {net_vol_str}   Net 5D (Bandar 1W) = {net_5d_str}")
-        ax_vol.text(0.01, 0.88, vol_text, transform=ax_vol.transAxes, color='#00ffff', fontsize=8.5, fontweight='bold')
+        vol_text = (f"Buy: {last_buy_pct}%  Sell: {100 - last_buy_pct}%  Net 1D: {net_vol_str}  Net 5D: {net_5d_str}")
+        ax_vol.text(0.01, 0.85, vol_text, transform=ax_vol.transAxes, color='#00ffff', fontsize=8, fontweight='bold')
         ax_vol.set_ylim(0, df['Volume'].max() * 1.35)
 
         mm_colors = ['#ffff00' if v >= 0 else '#555555' for v in df['MM']]
         ax_mm.bar(x_indices, df['MM'], color=mm_colors, width=0.4)
-        ax_mm.text(0.01, 0.85, "Market Maker", transform=ax_mm.transAxes, color='#ffff00', fontsize=8.5, fontweight='bold')
-        ax_mm.text(len(df) + 0.5, df['MM'].iloc[-1], f"{df['MM'].iloc[-1]:.4f}", color='black', backgroundcolor='#ffff00', fontsize=8.5, fontweight='bold')
+        ax_mm.text(0.01, 0.80, "Market Maker", transform=ax_mm.transAxes, color='#ffff00', fontsize=8, fontweight='bold')
+        ax_mm.text(len(df) + 0.5, df['MM'].iloc[-1], f"{df['MM'].iloc[-1]:.2f}", color='black', backgroundcolor='#ffff00', fontsize=8, fontweight='bold')
 
         step = max(1, len(df) // 8)
         ax_mm.set_xticks(x_indices[::step])
@@ -532,7 +563,8 @@ def broadcast_screening_results(signals, title_header, tf_code, target_chat_id=N
     header_msg = (
         f"🔥 *{title_header}*\n"
         f"🕒 *Waktu Scan:* `{now_str}`\n"
-        f"🎯 *Total Lolos Filter:* `{len(signals)} Emiten`\n"
+        f"🎯 *Total Sinyal Terkirim:* `{len(signals)} Emiten`\n"
+        f"⏱️ *Filter Cooldown:* `60 Menit Jeda per Emiten`\n"
         f"========================================\n\n"
     )
     current_msg = header_msg
@@ -562,7 +594,7 @@ def broadcast_screening_results(signals, title_header, tf_code, target_chat_id=N
         send_reply(target_chat_id, current_msg, reply_markup={"inline_keyboard": inline_keyboard})
 
 def auto_screener_loop():
-    print("🚀 Auto Scheduled Screener Engine Active (WIB Timezone Locked)...")
+    print("🚀 Auto Scheduled Screener Engine Active (60m Cooldown Filter Enabled)...")
     global SCREENER_ACTIVE
     last_triggered_sesi1, last_triggered_eod = "", ""
     
@@ -589,17 +621,19 @@ def auto_screener_loop():
                 broadcast_screening_results(signals_eod, "POWER ACCUMULATION VSA — END OF DAY (DAILY)", "1d")
                 last_triggered_eod = today_str
 
-            # Real-Time Spike Scanner saat Market Buka
+            # Real-Time Spike Scanner saat Market Buka (dengan Filter Jeda 60 Menit)
             if is_market_open():
                 signals_daily = run_scan_process_custom_tf(timeframe="1d")
-                if signals_daily:
-                    broadcast_screening_results(signals_daily, "🔥 REAL-TIME SIGNAL — DAILY (1D) BUY ACCUMULATION", "1d")
+                filtered_daily = filter_signals_with_cooldown(signals_daily)
+                if filtered_daily:
+                    broadcast_screening_results(filtered_daily, "🔥 REAL-TIME SIGNAL — DAILY (1D) BUY ACCUMULATION", "1d")
 
                 signals_5m = run_scan_process_custom_tf(timeframe="5m")
-                if signals_5m:
-                    broadcast_screening_results(signals_5m, "⚡ REAL-TIME SIGNAL — INTRADAY (5M) ACCUMULATION", "5m")
+                filtered_5m = filter_signals_with_cooldown(signals_5m)
+                if filtered_5m:
+                    broadcast_screening_results(filtered_5m, "⚡ REAL-TIME SIGNAL — INTRADAY (5M) ACCUMULATION", "5m")
 
-                time.sleep(300)
+                time.sleep(300)  # Scan ulang tiap 5 menit
             else:
                 time.sleep(20)
 
@@ -665,7 +699,7 @@ def main():
                 for update in res["result"]:
                     last_update_id = update["update_id"]
 
-                    # Handling Callback Query (Klik tombol inline chart)
+                    # Handling Callback Query (Tombol inline chart)
                     if "callback_query" in update:
                         cb = update["callback_query"]
                         cb_id = cb["id"]
@@ -674,17 +708,17 @@ def main():
 
                         try:
                             requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery", json={"callback_query_id": cb_id})
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            print(f"⚠️ Callback answer error: {e}")
 
                         if cb_data.startswith("chart_"):
                             parts = cb_data.split("_")
                             if len(parts) >= 3:
-                                symbol = parts[1]
+                                sym = parts[1]
                                 tf = parts[2]
-                                threading.Thread(target=process_chart_request, args=(c_id, symbol, tf), daemon=True).start()
+                                threading.Thread(target=process_chart_request, args=(c_id, sym, tf), daemon=True).start()
 
-                    # Handling Chat Messages (Command)
+                    # Handling Text Message / Commands
                     elif "message" in update and "text" in update["message"]:
                         msg = update["message"]
                         c_id = msg["chat"]["id"]
@@ -692,39 +726,38 @@ def main():
 
                         if text.lower() in ["/start", "/help"]:
                             help_msg = (
-                                "🤖 *RAFANO TRADER BOT COMMANDS*\n\n"
-                                "• `/scan` or `/screen` : Run real-time screening across Top 300 IHSG\n"
-                                "• `/c TICKER [TF]` : Generate chart (e.g., `/c ANTM 1d` or `/c BBCA 5m`)\n"
-                                "• `/screener_on` : Enable auto screener background task\n"
-                                "• `/screener_off` : Disable auto screener background task"
+                                "🤖 *RAFANO TRADER BOT*\n\n"
+                                "Gunakan perintah berikut untuk meminta chart:\n"
+                                "• `/c <kode_saham> [timeframe]`\n"
+                                "  _Contoh:_ `/c ANTM` atau `/c BBRI 5m`\n\n"
+                                "Perintah Screener Manual:\n"
+                                "• `/scan` : Jalankan screener realtime 5M\n"
+                                "• `/scan 1d` : Jalankan screener Daily"
                             )
                             send_reply(c_id, help_msg)
-
-                        elif text.lower() in ["/scan", "/screen"]:
-                            send_reply(c_id, "🔍 *Running manual scan on Top 300 IHSG... Please wait.*")
-                            def manual_scan(target_id):
-                                sigs = run_scan_process_custom_tf("1d")
-                                broadcast_screening_results(sigs, "MANUAL SCREENING — DAILY (1D)", "1d", target_chat_id=target_id)
-                            threading.Thread(target=manual_scan, args=(c_id,), daemon=True).start()
 
                         elif text.lower().startswith("/c ") or text.lower().startswith("/chart "):
                             parts = text.split()
                             if len(parts) >= 2:
-                                symbol = parts[1].upper()
-                                tf = parts[2].lower() if len(parts) >= 3 else "1d"
-                                threading.Thread(target=process_chart_request, args=(c_id, symbol, tf), daemon=True).start()
+                                sym = parts[1].upper()
+                                tf = parts[2] if len(parts) >= 3 else "1d"
+                                threading.Thread(target=process_chart_request, args=(c_id, sym, tf), daemon=True).start()
+                            else:
+                                send_reply(c_id, "⚠️ Format salah. Gunakan: `/c <kode_saham> [timeframe]`")
 
-                        elif text.lower() == "/screener_on":
-                            global SCREENER_ACTIVE
-                            SCREENER_ACTIVE = True
-                            send_reply(c_id, "✅ Auto-screener activated.")
-
-                        elif text.lower() == "/screener_off":
-                            SCREENER_ACTIVE = False
-                            send_reply(c_id, "⚠️ Auto-screener deactivated.")
+                        elif text.lower().startswith("/scan"):
+                            parts = text.split()
+                            tf = parts[1] if len(parts) >= 2 else "5m"
+                            send_reply(c_id, f"🔍 *Memulai Screening Manual ({tf.upper()})... Mohon tunggu.*")
+                            
+                            def manual_scan_job(chat_target, scan_tf):
+                                sigs = run_scan_process_custom_tf(timeframe=scan_tf)
+                                broadcast_screening_results(sigs, f"MANUAL SCAN — {scan_tf.upper()}", scan_tf, target_chat_id=chat_target)
+                            
+                            threading.Thread(target=manual_scan_job, args=(c_id, tf), daemon=True).start()
 
         except Exception as e:
-            print(f"⚠️ Exception in Telegram Polling: {e}")
+            print(f"⚠️ Polling loop error: {e}")
             time.sleep(3)
 
 if __name__ == "__main__":
