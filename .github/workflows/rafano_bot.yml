@@ -34,4 +34,4 @@ jobs:
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         STOCKBIT_USERNAME: ${{ secrets.STOCKBIT_USERNAME }}
         STOCKBIT_PASSWORD: ${{ secrets.STOCKBIT_PASSWORD }}
-      run: python autoscan/autoscan.py
+      run: python autoscan.py
