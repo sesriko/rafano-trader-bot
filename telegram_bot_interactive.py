@@ -48,7 +48,7 @@ SCREENER_ACTIVE = True
 # COOLDOWN TRACKER (60 MENIT)
 # ==========================================
 LAST_SENT_SIGNALS = {}
-COOLDOWN_SECONDS = 3600  # 60 Menit Jeda
+COOLDOWN_SECONDS = 3600  
 LAST_RESET_DATE = ""
 
 def filter_signals_with_cooldown(signals):
@@ -166,10 +166,9 @@ def is_market_open():
     return (session1_start <= current_time <= session1_end) or (session2_start <= current_time <= session2_end)
 
 # ==========================================
-# METRIK RSI (WILDER'S RMA), VSA, ATR & SCORE
+# METRIK RSI, VSA, ATR & SCORE
 # ==========================================
 def calculate_rsi(series, period=14):
-    """Kalkulasi RSI Standar TradingView/Stockbit menggunakan Wilder's Smoothing (RMA)"""
     delta = series.diff()
     gain = delta.where(delta > 0, 0.0)
     loss = -delta.where(delta < 0, 0.0)
@@ -278,7 +277,7 @@ def check_volume_spike_signal(df, symbol, threshold_multiplier=1.2, min_value_tr
     return False, {}
 
 # ==========================================
-# CHART GENERATOR (350 DPI OPTIMAL RESOLUTION)
+# CHART GENERATOR (OPTIMIZED FOR TELEGRAM PHOTO)
 # ==========================================
 def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industrial Sector | IHSG", output_filename="chart_output.png"):
     try:
@@ -289,7 +288,11 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
         df = df.ffill().bfill()
         if isinstance(df.index, pd.DatetimeIndex): df = df.sort_index()
 
-        last_close, last_open, last_high, last_low, last_vol = df['Close'].iloc[-1], df['Open'].iloc[-1], df['High'].iloc[-1], df['Low'].iloc[-1], df['Volume'].iloc[-1]
+        last_close = df['Close'].iloc[-1]
+        last_open = df['Open'].iloc[-1]
+        last_high = df['High'].iloc[-1]
+        last_low = df['Low'].iloc[-1]
+        last_vol = df['Volume'].iloc[-1]
 
         df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
         df['RSI14'] = calculate_rsi(df['Close'], period=14)
@@ -311,7 +314,9 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
             df['MM'] = (df['Close'] - df['EMA50']) / df['EMA50'] * 1000 + np.sin(np.linspace(0, 10, len(df))) * 15 - 10.9258
 
         plt.style.use('dark_background')
-        fig = plt.figure(figsize=(18, 10), facecolor='#000000')
+        
+        # 1. OPTIMAL FIGURE SIZE & DPI UNTUK SENDPHOTO
+        fig = plt.figure(figsize=(18, 10), dpi=150, facecolor='#000000')
         gs = gridspec.GridSpec(4, 1, height_ratios=[4, 0.2, 1.2, 0.8], hspace=0.04)
 
         ax_main = fig.add_subplot(gs[0])
@@ -383,11 +388,15 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
         max_high = df['High'].max()
         min_low = df['Low'].min()
         ax_main.set_ylim(min_low * 0.95, max_high * 1.25)
-        ax_main.set_xlim(-4, len(df) + 8)
+        ax_main.set_xlim(-4, len(df) + 2)
 
+        # DASHBOARD
         status_color = "#00ff00" if latest_setup["status"] == "BUY ACCUMULATION" else "#ffff00"
         dashboard_text = (
             f" 📊 RAFANO TRADER DASHBOARD\n"
+            f" -------------------------\n"
+            f" O: {safe_int(last_open)}  H: {safe_int(last_high)}  L: {safe_int(last_low)}  C: {safe_int(last_close)}\n"
+            f" VOL: {format_large_number(last_vol)}\n"
             f" -------------------------\n"
             f" SCORE : {signal_score}% ({score_lbl})\n"
             f" STATUS: {latest_setup['status']}\n"
@@ -411,20 +420,27 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
                      fontfamily='monospace', fontsize=8.5, color='#00ffff',
                      bbox=dict(boxstyle='round,pad=0.4', facecolor='#000000', alpha=0.70, edgecolor='#333333'))
 
+        # BADGE HARGA PIVOT DI LUAR Y-AXIS
         latest_ph, latest_pl = df['Pivot_High'].iloc[-1], df['Pivot_Low'].iloc[-1]
-        ax_main.text(len(df) + 0.5, latest_ph, f" {safe_int(latest_ph)} ", color='black', backgroundcolor='#ffff00', fontsize=8.5, fontweight='bold')
-        ax_main.text(len(df) + 0.5, latest_pl, f" {safe_int(latest_pl)} ", color='black', backgroundcolor='#00ffff', fontsize=8.5, fontweight='bold')
-
-        change_pct = ((last_close / df['Close'].iloc[-2]) - 1) * 100 if len(df) > 1 else 0.0
-        title_color = '#ffff00' if change_pct >= 0 else '#ff0000'
         
-        fig.text(0.01, 0.975, f"{symbol} : {safe_int(last_close)} ({change_pct:+.2f}%)", color=title_color, fontsize=15, fontweight='bold')
+        ax_main.text(1.01, latest_ph, f" {safe_int(latest_ph)} ", 
+                     transform=ax_main.get_yaxis_transform(),
+                     color='black', backgroundcolor='#ffff00', 
+                     fontsize=8.5, fontweight='bold', va='center', ha='left', clip_on=False)
+                     
+        ax_main.text(1.01, latest_pl, f" {safe_int(latest_pl)} ", 
+                     transform=ax_main.get_yaxis_transform(),
+                     color='black', backgroundcolor='#00ffff', 
+                     fontsize=8.5, fontweight='bold', va='center', ha='left', clip_on=False)
+
+        # HEADER CHART
+        fig.text(0.01, 0.975, f"{symbol}", color='#ffffff', fontsize=16, fontweight='bold')
         fig.text(0.45, 0.975, "RAFANO TRADER", color='#ffffff', fontsize=15, fontweight='bold')
         
         last_date_str = get_now_wib().strftime('%d %b %Y')
         fig.text(0.88, 0.975, f"{tf_clean.upper()} {last_date_str}", color='#ffff00', fontsize=10, fontweight='bold', ha='right')
 
-        sub_header = f"{sector_info} | High:{safe_int(last_high)} Low:{safe_int(last_low)} Vol:{format_large_number(last_vol)}"
+        sub_header = f"{sector_info}"
         fig.text(0.01, 0.945, sub_header, color='#888888', fontsize=8.5)
 
         for i in range(len(df)):
@@ -448,7 +464,11 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
         mm_colors = ['#ffff00' if v >= 0 else '#555555' for v in df['MM']]
         ax_mm.bar(x_indices, df['MM'], color=mm_colors, width=0.4)
         ax_mm.text(0.01, 0.80, "Market Maker", transform=ax_mm.transAxes, color='#ffff00', fontsize=8, fontweight='bold')
-        ax_mm.text(len(df) + 0.5, df['MM'].iloc[-1], f"{df['MM'].iloc[-1]:.2f}", color='black', backgroundcolor='#ffff00', fontsize=8, fontweight='bold')
+        
+        ax_mm.text(1.01, df['MM'].iloc[-1], f" {df['MM'].iloc[-1]:.2f} ", 
+                   transform=ax_mm.get_yaxis_transform(),
+                   color='black', backgroundcolor='#ffff00', 
+                   fontsize=8.5, fontweight='bold', va='center', ha='left', clip_on=False)
 
         step = max(1, len(df) // 8)
         ax_mm.set_xticks(x_indices[::step])
@@ -459,14 +479,14 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
         plt.setp(ax_main.get_xticklabels(), visible=False)
         plt.setp(ax_vol.get_xticklabels(), visible=False)
 
-        # RENDER 350 DPI (OPTIMAL & CEPAT)
+        # 2. SAVE IMAGE DENGAN 300 DPI (SANGAT TAJAM PADA SENDPHOTO)
         plt.savefig(
             output_filename, 
-            dpi=350, 
+            dpi=300, 
             bbox_inches='tight', 
+            pad_inches=0.1,
             facecolor=fig.get_facecolor(),
-            format='png',
-            pil_kwargs={'optimize': True}
+            format='png'
         )
         return output_filename
     finally:
@@ -550,7 +570,7 @@ def run_scan_process_custom_tf(timeframe="5m"):
     return detected_signals
 
 # ==========================================
-# TELEGRAM BROADCASTER
+# TELEGRAM BROADCASTER (MENGGUNAKAN SENDPHOTO)
 # ==========================================
 def send_reply(chat_id, text, reply_markup=None):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -563,6 +583,7 @@ def send_reply(chat_id, text, reply_markup=None):
         print(f"❌ Error Send Message: {e}")
 
 def send_photo_reply(chat_id, photo_path, caption=""):
+    # 3. KEMBALI MENGGUNAKAN sendPhoto AGAR DIKIRIM SEBAGAI FOTO LANGSUNG
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
     try:
         with open(photo_path, 'rb') as photo:
@@ -619,7 +640,7 @@ def broadcast_screening_results(signals, title_header, tf_code, target_chat_id=N
         send_reply(target_chat_id, current_msg, reply_markup={"inline_keyboard": inline_keyboard})
 
 def auto_screener_loop():
-    print("🚀 Auto Scheduled Screener Engine Active (60m Cooldown & 300 DPI Photo Mode)...")
+    print("🚀 Auto Scheduled Screener Engine Active...")
     global SCREENER_ACTIVE
     last_triggered_sesi1, last_triggered_eod = "", ""
     
@@ -675,7 +696,7 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
     if timeframe in ['5', '5mi', 'm5']: timeframe = '5m'
     if timeframe in ['15', '15mi', 'm15']: timeframe = '15m'
 
-    send_reply(chat_id, f"📊 * {stock_code} ({timeframe.upper()})...*")
+    send_reply(chat_id, f"📊 *Generating Chart {stock_code} ({timeframe.upper()})...*")
     df = fetch_stock_history_multi_tf(stock_code, timeframe=timeframe)
     
     if df is not None and not df.empty and len(df) >= 5:
@@ -699,7 +720,7 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
         out_file = f"chart_{stock_code}_{timeframe}.png"
         generate_pro_chart(df, symbol=stock_code, timeframe=timeframe, output_filename=out_file)
         
-        send_photo_reply(chat_id, out_file, caption=f"📊 *Chart {stock_code} ({timeframe.upper()}*")
+        send_photo_reply(chat_id, out_file, caption=f"📊 *Chart {stock_code} ({timeframe.upper()})*")
         
         if os.path.exists(out_file):
             os.remove(out_file)
@@ -710,7 +731,7 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
 # MAIN BOT TELEGRAM
 # ==========================================
 def main():
-    print("🚀 Starting RAFANO TRADER Bot (300 DPI & Precision Wilder RSI Enabled)...")
+    print("🚀 Starting RAFANO TRADER Bot...")
     screener_thread = threading.Thread(target=auto_screener_loop, daemon=True)
     screener_thread.start()
 
