@@ -278,7 +278,7 @@ def check_volume_spike_signal(df, symbol, threshold_multiplier=1.2, min_value_tr
     return False, {}
 
 # ==========================================
-# CHART GENERATOR (300 DPI OPTIMAL RESOLUTION)
+# CHART GENERATOR (350 DPI OPTIMAL RESOLUTION)
 # ==========================================
 def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industrial Sector | IHSG", output_filename="chart_output.png"):
     try:
@@ -459,10 +459,10 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
         plt.setp(ax_main.get_xticklabels(), visible=False)
         plt.setp(ax_vol.get_xticklabels(), visible=False)
 
-        # RENDER 300 DPI (OPTIMAL & CEPAT)
+        # RENDER 350 DPI (OPTIMAL & CEPAT)
         plt.savefig(
             output_filename, 
-            dpi=300, 
+            dpi=350, 
             bbox_inches='tight', 
             facecolor=fig.get_facecolor(),
             format='png',
