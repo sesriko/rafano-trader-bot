@@ -699,7 +699,7 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
         out_file = f"chart_{stock_code}_{timeframe}.png"
         generate_pro_chart(df, symbol=stock_code, timeframe=timeframe, output_filename=out_file)
         
-        send_photo_reply(chat_id, out_file, caption=f"📊 *Chart {stock_code} ({timeframe.upper()}) — 300 DPI High-Res Edition*")
+        send_photo_reply(chat_id, out_file, caption=f"📊 *Chart {stock_code} ({timeframe.upper()}*")
         
         if os.path.exists(out_file):
             os.remove(out_file)
