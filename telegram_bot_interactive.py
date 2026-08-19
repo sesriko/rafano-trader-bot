@@ -8,8 +8,8 @@ import pytz
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
 import matplotlib.patches as patches
+import matplotlib.gridspec as gridspec
 from concurrent.futures import ThreadPoolExecutor
 
 try:
@@ -168,8 +168,16 @@ def is_market_open():
     return (session1_start <= current_time <= session1_end) or (session2_start <= current_time <= session2_end)
 
 # ==========================================
-# METRIK VSA, ATR & SIGNAL SCORE
+# METRIK RSI, VSA, ATR & SIGNAL SCORE
 # ==========================================
+def calculate_rsi(series, period=14):
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period, min_periods=1).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period, min_periods=1).mean()
+    rs = gain / loss.replace(0, 0.001)
+    rsi = 100 - (100 / (1 + rs))
+    return rsi.fillna(50)
+
 def calculate_atr(df, period=14):
     high, low, close = df['High'], df['Low'], df['Close']
     tr1 = high - low
@@ -245,7 +253,10 @@ def check_volume_spike_signal(df, symbol, threshold_multiplier=1.2, min_value_tr
     avg_vol_v1, last_open, last_buy_ratio = last_row['V1'], last_row['Open'], buy_ratios[-1]
     
     df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
+    df['RSI14'] = calculate_rsi(df['Close'], period=14)
+    
     ema_50 = df['EMA50'].iloc[-1]
+    last_rsi = round(df['RSI14'].iloc[-1], 2)
 
     net_5d_vol = df['Net_Vol_VSA'].tail(5).sum()
     is_bandar_accum = net_5d_vol > 0
@@ -259,12 +270,12 @@ def check_volume_spike_signal(df, symbol, threshold_multiplier=1.2, min_value_tr
             "symbol": symbol, "close": safe_int(last_close), "change_pct": change_pct,
             "vol_multiple": vol_multiple, "buy_ratio": safe_int(last_buy_ratio * 100),
             "volume": safe_int(last_vol), "value_traded": value_traded,
-            "bandar_5d": net_5d_vol, "score": score, "score_label": score_label
+            "bandar_5d": net_5d_vol, "rsi": last_rsi, "score": score, "score_label": score_label
         }
     return False, {}
 
 # ==========================================
-# CHART GENERATOR (DPI=300 HIGH RESOLUTION)
+# CHART GENERATOR (DPI=600 ULTRA HIGH RESOLUTION)
 # ==========================================
 def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industrial Sector | IHSG", output_filename="chart_output.png"):
     try:
@@ -277,7 +288,9 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
 
         last_close, last_open, last_high, last_low, last_vol = df['Close'].iloc[-1], df['Open'].iloc[-1], df['High'].iloc[-1], df['Low'].iloc[-1], df['Volume'].iloc[-1]
 
+        # INDIKATOR TREN: Menggunakan EMA 50 & RSI 14
         df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
+        df['RSI14'] = calculate_rsi(df['Close'], period=14)
         df['Trend_Curve'] = df['EMA50']
         df['ATR'] = calculate_atr(df, period=14)
 
@@ -288,6 +301,7 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
         df, buy_ratios = calculate_vsa_metrics(df)
         net_5d_vol = df['Net_Vol_VSA'].tail(5).sum()
         net_vol_today = df['Net_Vol_VSA'].iloc[-1]
+        last_rsi = round(df['RSI14'].iloc[-1], 2)
         
         signal_score, score_lbl = calculate_buy_signal_strength(df)
 
@@ -347,6 +361,7 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
             net_5d_i = df['Net_Vol_VSA'].iloc[max(0, i-4):i+1].sum()
             is_bandar_accum_i = net_5d_i > 0
 
+            # Evaluasi Tren menggunakan EMA 50
             is_accum_trend = (c_price > 50) and (c_price > ema_50) and (c_price > o_price) and (vol_curr >= vol_avg * 1.0) and (b_ratio >= 0.55) and is_bandar_accum_i
 
             if is_accum_trend and (i - last_signal_idx >= 4):
@@ -377,9 +392,9 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
             f" SCORE : {signal_score}% ({score_lbl})\n"
             f" STATUS: {latest_setup['status']}\n"
             f" ENTRY : {latest_setup['entry'] if latest_setup['entry'] > 0 else last_close}\n"
-            f" TP1   : {latest_setup['tp1'] if latest_setup['tp1'] > 0 else round_to_ihsg_fraction(last_close*1.035)}\n"
-            f" TP2   : {latest_setup['tp2'] if latest_setup['tp2'] > 0 else round_to_ihsg_fraction(last_close*1.07)}\n"
-            f" SL    : {latest_setup['danger'] if latest_setup['danger'] > 0 else round_to_ihsg_fraction(last_close*0.95)}"
+            f" TP1    : {latest_setup['tp1'] if latest_setup['tp1'] > 0 else round_to_ihsg_fraction(last_close*1.035)}\n"
+            f" TP2    : {latest_setup['tp2'] if latest_setup['tp2'] > 0 else round_to_ihsg_fraction(last_close*1.07)}\n"
+            f" SL     : {latest_setup['danger'] if latest_setup['danger'] > 0 else round_to_ihsg_fraction(last_close*0.95)}"
         )
         
         ax_main.text(0.015, 0.96, dashboard_text, transform=ax_main.transAxes, verticalalignment='top', horizontalalignment='left',
@@ -387,9 +402,10 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
                      bbox=dict(boxstyle='round,pad=0.4', facecolor='#000000', alpha=0.70, edgecolor='#333333'))
 
         stat_text_right = (
-            f"BANDAR 1W : {'ACCUM' if net_5d_vol > 0 else 'DISTRIB'}\n"
-            f"NET VOL 1D: {format_large_number(net_vol_today, show_sign=True)}\n"
-            f"VSA BUY   : {safe_int(buy_ratios[-1]*100)}%"
+            f"RSI (14)   : {last_rsi}\n"
+            f"BANDAR 1W  : {'ACCUM' if net_5d_vol > 0 else 'DISTRIB'}\n"
+            f"NET VOL 1D : {format_large_number(net_vol_today, show_sign=True)}\n"
+            f"VSA BUY    : {safe_int(buy_ratios[-1]*100)}%"
         )
         ax_main.text(0.985, 0.96, stat_text_right, transform=ax_main.transAxes, verticalalignment='top', horizontalalignment='right',
                      fontfamily='monospace', fontsize=8.5, color='#00ffff',
@@ -443,10 +459,10 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
         plt.setp(ax_main.get_xticklabels(), visible=False)
         plt.setp(ax_vol.get_xticklabels(), visible=False)
 
-        # PENINGKATAN RESOLUSI RENDER (DPI=300) & OPTIMASI LOSSLESS
+        # RENDER ULTRA HIGH RESOLUTION (DPI=600)
         plt.savefig(
             output_filename, 
-            dpi=300, 
+            dpi=600, 
             bbox_inches='tight', 
             facecolor=fig.get_facecolor(),
             format='png',
@@ -547,7 +563,6 @@ def send_reply(chat_id, text, reply_markup=None):
         print(f"❌ Error Send Message: {e}")
 
 def send_photo_reply(chat_id, photo_path, caption=""):
-    # Pengiriman menggunakan sendPhoto agar muncul langsung sebagai FOTO visual di chat Telegram
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
     try:
         with open(photo_path, 'rb') as photo:
@@ -583,6 +598,7 @@ def broadcast_screening_results(signals, title_header, tf_code, target_chat_id=N
         item_str = (
             f"{idx}. *{item['symbol']}* — Harga `{item['close']}` ({item['change_pct']:+.2f}%)\n"
             f"    ├ ⚡ *Buy Strength Score: {item['score']}%* ({item['score_label']})\n"
+            f"    ├ 📊 *RSI (14): {item['rsi']}*\n"
             f"    ├ Vol Spike: `{item['vol_multiple']:.1f}x V1` | Buy Vol: `{item['buy_ratio']}%`\n"
             f"    └ Bandar 1W: `{format_large_number(item['bandar_5d'], show_sign=True)}` (ACCUM)\n\n"
         )
@@ -630,7 +646,7 @@ def auto_screener_loop():
                 broadcast_screening_results(signals_eod, "POWER ACCUMULATION VSA — END OF DAY (DAILY)", "1d")
                 last_triggered_eod = today_str
 
-            # Real-Time Spike Scanner saat Market Buka (dengan Filter Jeda 60 Menit)
+            # Real-Time Spike Scanner saat Market Buka
             if is_market_open():
                 signals_daily = run_scan_process_custom_tf(timeframe="1d")
                 filtered_daily = filter_signals_with_cooldown(signals_daily)
@@ -659,7 +675,7 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
     if timeframe in ['5', '5mi', 'm5']: timeframe = '5m'
     if timeframe in ['15', '15mi', 'm15']: timeframe = '15m'
 
-    send_reply(chat_id, f"📊 *Generating High-Res Chart {stock_code} ({timeframe.upper()})...*")
+    send_reply(chat_id, f"📊 *Generating Ultra HD 400 DPI Chart {stock_code} ({timeframe.upper()})...*")
     df = fetch_stock_history_multi_tf(stock_code, timeframe=timeframe)
     
     if df is not None and not df.empty and len(df) >= 5:
@@ -684,7 +700,7 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
         generate_pro_chart(df, symbol=stock_code, timeframe=timeframe, output_filename=out_file)
         
         # Kirim secara langsung berupa foto visual
-        send_photo_reply(chat_id, out_file, caption=f"📊 *Chart {stock_code} ({timeframe.upper()}) — Ultra HD Edition*")
+        send_photo_reply(chat_id, out_file, caption=f"📊 *Chart {stock_code} ({timeframe.upper()}*")
         
         if os.path.exists(out_file):
             os.remove(out_file)
@@ -695,7 +711,7 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
 # MAIN BOT TELEGRAM
 # ==========================================
 def main():
-    print("🚀 Starting RAFANO TRADER Bot (Auto-Timezone: WIB/UTC+7 Connected)...")
+    print("🚀 Starting RAFANO TRADER Bot (600 DPI & RSI Enabled)...")
     screener_thread = threading.Thread(target=auto_screener_loop, daemon=True)
     screener_thread.start()
 
