@@ -56,7 +56,6 @@ def filter_signals_with_cooldown(signals):
     current_time = time.time()
     today_str = get_now_wib().strftime('%Y-%m-%d')
 
-    # Reset cache cooldown setiap pergantian hari
     if LAST_RESET_DATE != today_str:
         LAST_SENT_SIGNALS.clear()
         LAST_RESET_DATE = today_str
@@ -66,7 +65,6 @@ def filter_signals_with_cooldown(signals):
         sym = sig['symbol']
         last_sent = LAST_SENT_SIGNALS.get(sym, 0)
 
-        # Kirim jika belum pernah dikirim ATAU sudah lewat 60 menit
         if (current_time - last_sent) >= COOLDOWN_SECONDS:
             filtered_list.append(sig)
             LAST_SENT_SIGNALS[sym] = current_time
@@ -168,14 +166,19 @@ def is_market_open():
     return (session1_start <= current_time <= session1_end) or (session2_start <= current_time <= session2_end)
 
 # ==========================================
-# METRIK RSI, VSA, ATR & SIGNAL SCORE
+# METRIK RSI (WILDER'S RMA), VSA, ATR & SCORE
 # ==========================================
 def calculate_rsi(series, period=14):
+    """Kalkulasi RSI Standar TradingView/Stockbit menggunakan Wilder's Smoothing (RMA)"""
     delta = series.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period, min_periods=1).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period, min_periods=1).mean()
-    rs = gain / loss.replace(0, 0.001)
-    rsi = 100 - (100 / (1 + rs))
+    gain = delta.where(delta > 0, 0.0)
+    loss = -delta.where(delta < 0, 0.0)
+    
+    avg_gain = gain.ewm(alpha=1/period, min_periods=period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1/period, min_periods=period, adjust=False).mean()
+    
+    rs = avg_gain / avg_loss.replace(0, 0.00001)
+    rsi = 100.0 - (100.0 / (1.0 + rs))
     return rsi.fillna(50)
 
 def calculate_atr(df, period=14):
@@ -275,7 +278,7 @@ def check_volume_spike_signal(df, symbol, threshold_multiplier=1.2, min_value_tr
     return False, {}
 
 # ==========================================
-# CHART GENERATOR (DPI=600 ULTRA HIGH RESOLUTION)
+# CHART GENERATOR (300 DPI OPTIMAL RESOLUTION)
 # ==========================================
 def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industrial Sector | IHSG", output_filename="chart_output.png"):
     try:
@@ -288,7 +291,6 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
 
         last_close, last_open, last_high, last_low, last_vol = df['Close'].iloc[-1], df['Open'].iloc[-1], df['High'].iloc[-1], df['Low'].iloc[-1], df['Volume'].iloc[-1]
 
-        # INDIKATOR TREN: Menggunakan EMA 50 & RSI 14
         df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
         df['RSI14'] = calculate_rsi(df['Close'], period=14)
         df['Trend_Curve'] = df['EMA50']
@@ -361,7 +363,6 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
             net_5d_i = df['Net_Vol_VSA'].iloc[max(0, i-4):i+1].sum()
             is_bandar_accum_i = net_5d_i > 0
 
-            # Evaluasi Tren menggunakan EMA 50
             is_accum_trend = (c_price > 50) and (c_price > ema_50) and (c_price > o_price) and (vol_curr >= vol_avg * 1.0) and (b_ratio >= 0.55) and is_bandar_accum_i
 
             if is_accum_trend and (i - last_signal_idx >= 4):
@@ -379,7 +380,6 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
                 latest_setup = {"status": "BUY ACCUMULATION", "entry": buy_price, "tp1": tp1_price, "tp2": tp2_price, "danger": danger_price}
                 last_signal_idx = i
 
-        # Margins & Position Settings
         max_high = df['High'].max()
         min_low = df['Low'].min()
         ax_main.set_ylim(min_low * 0.95, max_high * 1.25)
@@ -459,10 +459,10 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
         plt.setp(ax_main.get_xticklabels(), visible=False)
         plt.setp(ax_vol.get_xticklabels(), visible=False)
 
-        # RENDER ULTRA HIGH RESOLUTION (DPI=600)
+        # RENDER 300 DPI (OPTIMAL & CEPAT)
         plt.savefig(
             output_filename, 
-            dpi=600, 
+            dpi=300, 
             bbox_inches='tight', 
             facecolor=fig.get_facecolor(),
             format='png',
@@ -550,7 +550,7 @@ def run_scan_process_custom_tf(timeframe="5m"):
     return detected_signals
 
 # ==========================================
-# TELEGRAM BROADCASTER (DIRECT PHOTO)
+# TELEGRAM BROADCASTER
 # ==========================================
 def send_reply(chat_id, text, reply_markup=None):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -619,7 +619,7 @@ def broadcast_screening_results(signals, title_header, tf_code, target_chat_id=N
         send_reply(target_chat_id, current_msg, reply_markup={"inline_keyboard": inline_keyboard})
 
 def auto_screener_loop():
-    print("🚀 Auto Scheduled Screener Engine Active (60m Cooldown & Direct High-Res Photo Mode)...")
+    print("🚀 Auto Scheduled Screener Engine Active (60m Cooldown & 300 DPI Photo Mode)...")
     global SCREENER_ACTIVE
     last_triggered_sesi1, last_triggered_eod = "", ""
     
@@ -633,20 +633,20 @@ def auto_screener_loop():
             today_str, current_time_str = now.strftime('%Y-%m-%d'), now.strftime('%H:%M')
             weekday = now.weekday()
             
-            # Sesi 1 Scheduler (WIB)
+            # Sesi 1 Scheduler
             target_sesi1_time = "11:25" if weekday == 4 else "11:55"
             if weekday < 5 and current_time_str == target_sesi1_time and last_triggered_sesi1 != today_str:
                 signals_sesi1 = run_scan_process_custom_tf(timeframe="15m")
                 broadcast_screening_results(signals_sesi1, "POWER ACCUMULATION VSA — AKHIR SESI 1 (15M)", "15m")
                 last_triggered_sesi1 = today_str
 
-            # End of Day Scheduler (WIB)
+            # End of Day Scheduler
             if weekday < 5 and current_time_str == "15:55" and last_triggered_eod != today_str:
                 signals_eod = run_scan_process_custom_tf(timeframe="1d")
                 broadcast_screening_results(signals_eod, "POWER ACCUMULATION VSA — END OF DAY (DAILY)", "1d")
                 last_triggered_eod = today_str
 
-            # Real-Time Spike Scanner saat Market Buka
+            # Real-Time Spike Scanner
             if is_market_open():
                 signals_daily = run_scan_process_custom_tf(timeframe="1d")
                 filtered_daily = filter_signals_with_cooldown(signals_daily)
@@ -658,7 +658,7 @@ def auto_screener_loop():
                 if filtered_5m:
                     broadcast_screening_results(filtered_5m, "⚡ REAL-TIME SIGNAL — INTRADAY (5M) ACCUMULATION", "5m")
 
-                time.sleep(300)  # Scan ulang tiap 5 menit
+                time.sleep(300)
             else:
                 time.sleep(20)
 
@@ -675,7 +675,7 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
     if timeframe in ['5', '5mi', 'm5']: timeframe = '5m'
     if timeframe in ['15', '15mi', 'm15']: timeframe = '15m'
 
-    send_reply(chat_id, f"📊 *Generating Ultra HD 400 DPI Chart {stock_code} ({timeframe.upper()})...*")
+    send_reply(chat_id, f"📊 * {stock_code} ({timeframe.upper()})...*")
     df = fetch_stock_history_multi_tf(stock_code, timeframe=timeframe)
     
     if df is not None and not df.empty and len(df) >= 5:
@@ -699,8 +699,7 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
         out_file = f"chart_{stock_code}_{timeframe}.png"
         generate_pro_chart(df, symbol=stock_code, timeframe=timeframe, output_filename=out_file)
         
-        # Kirim secara langsung berupa foto visual
-        send_photo_reply(chat_id, out_file, caption=f"📊 *Chart {stock_code} ({timeframe.upper()}*")
+        send_photo_reply(chat_id, out_file, caption=f"📊 *Chart {stock_code} ({timeframe.upper()}) — 300 DPI High-Res Edition*")
         
         if os.path.exists(out_file):
             os.remove(out_file)
@@ -711,7 +710,7 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
 # MAIN BOT TELEGRAM
 # ==========================================
 def main():
-    print("🚀 Starting RAFANO TRADER Bot (600 DPI & RSI Enabled)...")
+    print("🚀 Starting RAFANO TRADER Bot (300 DPI & Precision Wilder RSI Enabled)...")
     screener_thread = threading.Thread(target=auto_screener_loop, daemon=True)
     screener_thread.start()
 
@@ -725,7 +724,6 @@ def main():
                 for update in res["result"]:
                     last_update_id = update["update_id"]
 
-                    # Handling Callback Query (Tombol inline chart)
                     if "callback_query" in update:
                         cb = update["callback_query"]
                         cb_id = cb["id"]
@@ -744,7 +742,6 @@ def main():
                                 tf = parts[2]
                                 threading.Thread(target=process_chart_request, args=(c_id, sym, tf), daemon=True).start()
 
-                    # Handling Text Message / Commands
                     elif "message" in update and "text" in update["message"]:
                         msg = update["message"]
                         c_id = msg["chat"]["id"]
