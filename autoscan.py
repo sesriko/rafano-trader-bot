@@ -13,10 +13,8 @@ except ImportError:
 # ==========================================
 # 1. KONFIGURASI KREDENSIAL & ENVIRONMENT
 # ==========================================
-TELEGRAM_BOT_TOKEN = os.getenv(
-    'TELEGRAM_BOT_TOKEN', '8833563003:AAGSx750u_QXWpr91sd3yuD6LcnMXtWWrxQ'
-)
-TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', '5660874676')
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
 STOCKBIT_USERNAME = os.getenv('STOCKBIT_USERNAME')
 STOCKBIT_PASSWORD = os.getenv('STOCKBIT_PASSWORD')
@@ -437,7 +435,6 @@ def send_rafano_alert(data):
 
   try:
     requests.post(url, json=payload, timeout=5)
-    print(f'✅ Telegram test alert terkirim untuk {ticker}!')
   except Exception as e:
     print(f'Gagal kirim Telegram alert untuk {ticker}: {e}')
 
@@ -450,33 +447,6 @@ def run_rafano_bot():
       f'🚀 Running Rafano Trader Signal Engine V9.5 with Scoring (Stockbit Live'
       f' x{MAX_WORKERS})...'
   )
-
-  # --- UJI COBA KIRIM SINYAL DUMMY KE TELEGRAM ---
-  print('🧪 Mengirimkan Sinyal Dummy untuk Tes Telegram...')
-  dummy_signal = {
-      'ticker': 'TEST',
-      'price': 1000,
-      'change_pct': 3.5,
-      'volume_ratio': 2.1,
-      'turnover_mb': 5.0,
-      'rsi': 58,
-      'adx': 26,
-      'ema50': 950,
-      'bb_upper': 1020,
-      'foreign_status': 'NET BUY (+Rp 15.2B)',
-      'stop_loss': 930,
-      'sl_pct': -7.0,
-      'tp1': 1070,
-      'tp1_pct': 7.0,
-      'tp2': 1140,
-      'tp2_pct': 14.0,
-      'atr': 35,
-      'score': 95,
-      'grade': 'S (STRONG BUY)',
-      'progress_bar': '██████████',
-  }
-  send_rafano_alert(dummy_signal)
-  print('--------------------------------------------------')
 
   stockbit_token = get_stockbit_token()
   watchlist = get_all_ihsg_stocks()
@@ -505,7 +475,7 @@ def run_rafano_bot():
       except Exception as e:
         print(f'❌ Error processing {ticker}: {e}')
 
-  print(f'🏁 Scanning Selesai. Total Sinyal Asli Ditemukan: {signals_found}')
+  print(f'🏁 Scanning Selesai. Total Sinyal Ditemukan: {signals_found}')
 
 
 if __name__ == '__main__':
