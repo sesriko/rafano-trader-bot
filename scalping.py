@@ -137,71 +137,68 @@ def get_all_ihsg_stocks():
       'JPFA',
       'JSMR',
       'KAEF',
-      * [
-          'KKGI',
-          'KLBF',
-          'KOPI',
-          'KPIG',
-          'LEAD',
-          'LPPF',
-          'LSIP',
-          'MAPI',
-          'MBAP',
-          'MDKA',
-          'MEDC',
-          'MEGA',
-          'MIKA',
-          'MLPL',
-          'MNCN',
-          'MPMX',
-          'MTEL',
-          'MYOR',
-          'NCKL',
-          'NICL',
-          'NIKI',
-          'NOBU',
-          'PANI',
-          'PGAS',
-          'PGEO',
-          'PNBN',
-          'PNLF',
-          'PTBA',
-          'PTRO',
-          'PWON',
-          'RALS',
-          'RMKE',
-          'ROTI',
-          'SCMA',
-          'SIDO',
-          'SILO',
-          'SIMP',
-          'SMDR',
-          'SMGR',
-          'SMRA',
-          'SOCI',
-          'SSIA',
-          'STAA',
-          'TBIG',
-          'TBLA',
-          'TINS',
-          'TKIM',
-          'TLKM',
-          'TMAS',
-          'TOWR',
-          'TPIA',
-          'TRIS',
-          'ULTJ',
-          'UNTR',
-          'UNVR',
-          'VKTR',
-          'WIFI',
-          'WIIM',
-          'WIKA',
-          'WINS',
-          'WSKT',
-      ],
+      'KKGI',
+      'KLBF',
+      'KOPI',
+      'KPIG',
+      'LEAD',
+      'LPPF',
+      'LSIP',
+      'MAPI',
+      'MBAP',
+      'MDKA',
+      'MEDC',
+      'MEGA',
+      'MIKA',
+      'MLPL',
+      'MNCN',
+      'MPMX',
+      'MTEL',
+      'MYOR',
+      'NCKL',
+      'NICL',
+      'NIKI',
+      'NOBU',
+      'PANI',
+      'PGAS',
+      'PGEO',
+      'PNBN',
+      'PNLF',
+      'PTBA',
+      'PTRO',
+      'PWON',
+      'RALS',
+      'RMKE',
+      'ROTI',
+      'SCMA',
+      'SIDO',
+      'SILO',
+      'SIMP',
+      'SMDR',
+      'SMGR',
+      'SMRA',
+      'SOCI',
+      'SSIA',
+      'STAA',
+      'TBIG',
+      'TBLA',
+      'TINS',
+      'TKIM',
+      'TLKM',
+      'TMAS',
+      'TOWR',
+      'TPIA',
+      'TRIS',
+      'ULTJ',
+      'UNTR',
+      'UNVR',
+      'VKTR',
+      'WIFI',
+      'WIIM',
+      'WIKA',
+      'WINS',
+      'WSKT',
   ]
-  # Deduplikasi aman
   return sorted(list(set(stocks)))
 
 
@@ -215,13 +212,13 @@ def calculate_scalp_score(
 
   if is_green_candle:
     score += 15
-  if price_change_pct >= 1.0:
+  if price_change_pct >= 1.5:
     score += 15
-  if price_change_pct >= 3.0:
+  if price_change_pct >= 4.0:
     score += 10
-  if vol_ratio >= 1.5:
+  if vol_ratio >= 1.8:
     score += 10
-  if turnover_mb >= 1.0:
+  if turnover_mb >= 2.0:
     score += 10
 
   if score >= 80:
@@ -238,16 +235,16 @@ def calculate_scalp_score(
 
 
 # ==========================================
-# 4. TRADINGVIEW ANALISIS & EMA 200/50
+# 4. ANALISIS TRADINGVIEW (PURE SCALPING)
 # ==========================================
-def analyze_scalping_signals(ticker):
+def analyze_autoscan_signals(ticker):
   try:
-    # Mengambil data realtime harian melalui TradingView API (Bursa: IDX)
+    # Menggunakan Interval 15 Menit untuk menangkap momentum scalping real-time
     handler = TA_Handler(
         symbol=ticker,
         exchange='IDX',
         screener='indonesia',
-        interval=Interval.INTERVAL_1_DAY,
+        interval=Interval.INTERVAL_15M,
     )
 
     analysis = handler.get_analysis()
@@ -255,22 +252,16 @@ def analyze_scalping_signals(ticker):
 
     close_price = float(indicators.get('close', 0))
     open_price = float(indicators.get('open', 0))
-    prev_close = float(
-        indicators.get('open', close_price)
-    )  # Aproksimasi aman jika tak tersedia
     volume = float(indicators.get('volume', 0))
-    vol_sma20 = float(
-        indicators.get('SMA20', volume)
-    )  # Menggunakan SMA volume sebagai pembanding
+    vol_sma20 = float(indicators.get('SMA20', volume))
 
-    # EMA Major 200 & EMA Trigger 50 dari TradingView
+    # EMA Major 200 & EMA Trigger 50 (Sesuai aturan setting Anda)
     ema_major = float(indicators.get('EMA200', 0))
     ema_trigger = float(indicators.get('EMA50', 0))
 
     if close_price <= 0 or ema_major <= 0 or ema_trigger <= 0:
       return None
 
-    # Kalkulasi Persentase & Turnover
     change_from_open = (
         ((close_price - open_price) / open_price) * 100
         if open_price > 0
@@ -284,25 +275,35 @@ def analyze_scalping_signals(ticker):
 
     is_green_candle = close_price >= open_price
 
-    # Sesuai Aturan: Harga berada di atas EMA Major 200 dan EMA Trigger 50
+    # ==========================================
+    # ATURAN SCALPING MURNI
+    # ==========================================
+    # 1. Trend: Di atas EMA Major 200 dan EMA Trigger 50
     is_uptrend = close_price > ema_major and close_price > ema_trigger
-    is_active_moving = (
-        price_change_pct >= 0.5
-        and turnover_value >= 100_000_000
-        and is_uptrend
+
+    # 2. Momentum Scalping: Kenaikan minimal +1% (tanpa batas atas agar saham kencang tetap masuk),
+    #    volume melonjak minimal 1.5x dari rata-rata, dan candle hijau.
+    is_price_valid = price_change_pct >= 1.0
+    is_volume_spike = volume_ratio >= 1.5
+    is_liquidity_valid = turnover_mb >= 1.0
+
+    is_scalp_ready = (
+        is_uptrend
+        and is_price_valid
+        and is_volume_spike
+        and is_liquidity_valid
+        and is_green_candle
     )
 
-    if is_active_moving:
+    if is_scalp_ready:
       score, grade, progress_bar = calculate_scalp_score(
           volume_ratio, price_change_pct, turnover_mb, is_green_candle
       )
 
-      # Estimasi ATR menggunakan volatilitas sederhana (misal 1.5% dari harga)
-      approx_atr = close_price * 0.015
-
+      approx_atr = close_price * 0.012
       stop_loss = round(close_price - (1.0 * approx_atr), 2)
-      tp1 = round(close_price + (1.0 * approx_atr), 2)
-      tp2 = round(close_price + (2.0 * approx_atr), 2)
+      tp1 = round(close_price + (1.2 * approx_atr), 2)
+      tp2 = round(close_price + (2.5 * approx_atr), 2)
 
       sl_pct = round(((stop_loss - close_price) / close_price) * 100, 1)
       tp1_pct = round(((tp1 - close_price) / close_price) * 100, 1)
@@ -325,20 +326,19 @@ def analyze_scalping_signals(ticker):
           'progress_bar': progress_bar,
       }
   except Exception:
-    # Mengabaikan error koneksi sesaat pada ticker tertentu agar thread tetap berjalan lancar
     pass
 
   return None
 
 
 # ==========================================
-# 5. PENGIRIMAN ALERT TELEGRAM
+# 5. KIRIM ALERT TELEGRAM
 # ==========================================
-def send_scalp_alert(data):
+def send_autoscan_alert(data):
   ticker = data['ticker']
   chart_url = f'https://stockbit.com/symbol/{ticker}'
 
-  msg = f"""⚡ *RAFANO TRADINGVIEW SCALPING RADAR*
+  msg = f"""⚡ *RAFANO PURE SCALPING RADAR (15m)*
 📊 Stock: [{ticker}]({chart_url}) *(Buka Chart)*
 
 🎯 *SCALP SCORE*
@@ -377,21 +377,23 @@ def send_scalp_alert(data):
 
 
 # ==========================================
-# 6. EKSEKUSI UTAMA (MULTITHREADED)
+# 6. EKSEKUSI UTAMA
 # ==========================================
-def run_scalping_bot():
+def run_autoscan_bot():
   print(
-      f'🚀 Running Rafano TradingView Scalping Engine (Fast Scanner'
-      f' x{MAX_WORKERS})...'
+      f'🚀 Running Rafano Pure Scalping Engine (15m Interval | x{MAX_WORKERS}'
+      ' Workers)...'
   )
 
   watchlist = get_all_ihsg_stocks()
-  print(f'🔍 Scanning {len(watchlist)} emiten IDX via TradingView...')
+  print(
+      f'🔍 Scanning {len(watchlist)} emiten IDX dengan aturan Pure Scalping...'
+  )
   signals_found = 0
 
   with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
     future_to_ticker = {
-        executor.submit(analyze_scalping_signals, ticker): ticker
+        executor.submit(analyze_autoscan_signals, ticker): ticker
         for ticker in watchlist
     }
 
@@ -400,7 +402,7 @@ def run_scalping_bot():
       try:
         signal = future.result()
         if signal:
-          send_scalp_alert(signal)
+          send_autoscan_alert(signal)
           signals_found += 1
           print(
               f'✅ Scalp Alert terkirim untuk {ticker} (Score:'
@@ -409,8 +411,8 @@ def run_scalping_bot():
       except Exception as e:
         print(f'❌ Error processing {ticker}: {e}')
 
-  print(f'🏁 Scan Selesai. Total Sinyal Ditemukan: {signals_found}')
+  print(f'🏁 Scan Selesai. Total Sinyal Scalping Ditemukan: {signals_found}')
 
 
 if __name__ == '__main__':
-  run_scalping_bot()
+  run_autoscan_bot()
