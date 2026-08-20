@@ -35,3 +35,4 @@ jobs:
         STOCKBIT_USERNAME: ${{ secrets.STOCKBIT_USERNAME }}
         STOCKBIT_PASSWORD: ${{ secrets.STOCKBIT_PASSWORD }}
       run: python autoscan.py
+      run: python scalping.py
