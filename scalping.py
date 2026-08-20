@@ -230,22 +230,22 @@ def get_all_ihsg_stocks():
 def calculate_scalp_score(
     vol_ratio, price_change_pct, turnover_mb, is_green_candle
 ):
-  score = 40
+  score = 45  # Base score dinaikkan sedikit
 
   if is_green_candle:
     score += 15
-  if price_change_pct >= 1.0:
+  if price_change_pct >= 0.5:
     score += 15
-  if price_change_pct >= 3.0:
+  if price_change_pct >= 2.0:
     score += 10
-  if vol_ratio >= 1.5:
+  if vol_ratio >= 1.2:
     score += 10
-  if turnover_mb >= 1.0:
+  if turnover_mb >= 0.5:
     score += 10
 
-  if score >= 80:
+  if score >= 75:
     grade = '🔥 SCALP A+ (HIGH MOMENTUM)'
-  elif score >= 65:
+  elif score >= 60:
     grade = '⚡ SCALP A (GOOD MOMENTUM)'
   else:
     grade = '📈 SCALP B (WATCHLIST)'
@@ -257,7 +257,7 @@ def calculate_scalp_score(
 
 
 # ==========================================
-# 7. ANALISIS TEKNIKAL SCALPING
+# 7. ANALISIS TEKNIKAL SCALPING (DILONGGARKAN)
 # ==========================================
 def analyze_scalping_signals(ticker, stockbit_token):
   try:
@@ -290,7 +290,11 @@ def analyze_scalping_signals(ticker, stockbit_token):
     turnover_mb = round(turnover_value / 1_000_000_000, 2)
 
     is_green_candle = close_price >= open_price
-    is_active_moving = price_change_pct >= 0.5 and turnover_value >= 200_000_000
+    
+    # FILTER DILONGGARKAN DI SINI:
+    # 1. Perubahan harga minimal > 0.0% (asalkan hijau/naik tipis)
+    # 2. Turnover minimal Rp 50 Juta (0.05 Miliar)
+    is_active_moving = price_change_pct > 0.0 and turnover_value >= 50_000_000
 
     if is_active_moving:
       flow_text, _ = check_stockbit_flow(ticker, stockbit_token)
