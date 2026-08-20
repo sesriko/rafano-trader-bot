@@ -32,13 +32,11 @@ BASE_HEADERS = {
 
 
 # ==========================================
-# 2. STOCKBIT AUTHENTICATION ENGINE (WITH FALLBACK)
+# 2. STOCKBIT AUTHENTICATION ENGINE
 # ==========================================
 def get_stockbit_token():
-  """Login otomatis ke Stockbit untuk mengambil Bearer Token."""
   if not STOCKBIT_USERNAME or not STOCKBIT_PASSWORD:
-    print('⚠️ [STOCKBIT] Credentials Username/Password belum diset di Secrets.')
-    print('🔄 [FALLBACK] Beralih ke Stockbit Public API Mode (Tanpa Token).')
+    print('⚠️ [STOCKBIT] Credentials belum diset. Menggunakan Guest Mode.')
     return None
 
   login_url = 'https://api.stockbit.com/v2.4/login'
@@ -51,28 +49,20 @@ def get_stockbit_token():
     if response.status_code == 200:
       token = response.json().get('data', {}).get('token')
       if token:
-        print('✅ [STOCKBIT] Auto-Login Berhasil! Session Token Active.')
+        print('✅ [STOCKBIT] Auto-Login Berhasil!')
         return token
-    else:
-      print(f'⚠️ [STOCKBIT] Status Login HTTP {response.status_code}.')
   except Exception as e:
-    print(f'❌ [STOCKBIT] Error Request Login: {e}')
+    print(f'❌ [STOCKBIT] Error Login: {e}')
 
-  print(
-      '🔄 [FALLBACK] Login Stockbit Gagal. Mengaktifkan Stockbit Guest/Public'
-      ' Mode...'
-  )
   return None
 
 
 # ==========================================
-# 3. STOCKBIT REAL-TIME DATA FETCHERS
+# 3. STOCKBIT DATA FETCHERS
 # ==========================================
 def get_stockbit_kline(symbol, token):
-  """Fetch data Candle OHLCV 100% Real-Time langsung dari Stockbit API."""
   url = f'https://api.stockbit.com/v2.4/chart/kline?symbol={symbol}&resolution=D&limit=100'
   headers = BASE_HEADERS.copy()
-
   if token:
     headers['Authorization'] = f'Bearer {token}'
 
@@ -101,14 +91,12 @@ def get_stockbit_kline(symbol, token):
       return df
   except Exception:
     pass
-
   return None
 
 
 def check_stockbit_flow(symbol, token):
-  """Memeriksa Foreign Flow & Bandar Accumulation via Stockbit API."""
   if not token:
-    return 'N/A (Public Mode - No Flow Token)', 0
+    return 'N/A (Public Mode)', 0
 
   url = f'https://api.stockbit.com/v2.4/foreignflow/{symbol}'
   headers = BASE_HEADERS.copy()
@@ -134,16 +122,14 @@ def check_stockbit_flow(symbol, token):
 
 
 # ==========================================
-# 4. INTRADAY VOLUME PROJECTION ENGINE
+# 4. INTRADAY VOLUME PROJECTION
 # ==========================================
 def calculate_projected_volume(current_volume):
   now = datetime.now().time()
-
   t_start_s1, t_end_s1 = time(9, 0), time(12, 0)
   t_start_s2, t_end_s2 = time(13, 30), time(16, 0)
 
   elapsed_minutes = 0
-
   if now < t_start_s1:
     return current_volume
   elif t_start_s1 <= now <= t_end_s1:
@@ -175,13 +161,13 @@ def get_all_ihsg_stocks():
       print(f'✅ [IHSG ENGINE] Berhasil mengambil {len(stocks)} emiten IHSG!')
       return stocks
   except Exception as e:
-    print(f'⚠️ [IHSG ENGINE] Gagal fetch data IHSG otomatis: {e}')
+    print(f'⚠️ [IHSG ENGINE] Gagal fetch data IHSG: {e}')
 
-  return ['FPNI', 'KAEF', 'GIAA', 'NIKL', 'FUTR', 'BBRI', 'BMRI', 'TLKM', 'ASII', 'AMMN']
+  return ['FPNI', 'KAEF', 'GIAA', 'NIKL', 'FUTR', 'BBRI', 'BMRI', 'TLKM', 'ASII']
 
 
 # ==========================================
-# 6. LOGIKA SIGNAL SCORING ENGINE (0 - 100)
+# 6. SIGNAL SCORING ENGINE (DILONGGARKAN)
 # ==========================================
 def calculate_signal_score(
     vol_ratio,
@@ -192,50 +178,22 @@ def calculate_signal_score(
     net_foreign_val,
     turnover_mb,
 ):
-  score = 0
+  score = 50  # Basis skor awal lebih longgar agar mudah masuk
 
-  if vol_ratio >= 3.0:
-    score += 25
-  elif vol_ratio >= 2.0:
-    score += 20
-  elif vol_ratio >= 1.5:
+  if vol_ratio >= 1.2:
     score += 15
-
-  if adx_val >= 35:
-    score += 20
-  elif adx_val >= 25:
+  if price_change_pct >= 0.5:
     score += 15
-  elif adx_val >= 20:
+  if adx_val >= 15:
     score += 10
-
-  if price_change_pct >= 5.0:
-    score += 15
-  elif price_change_pct >= 3.0:
-    score += 10
-  elif price_change_pct >= 2.0:
-    score += 5
-
   if is_bb_breakout:
     score += 10
-
-  if 50 <= rsi14 <= 65:
+  if turnover_mb >= 0.5:
     score += 10
-  elif 45 <= rsi14 < 50 or 65 < rsi14 < 75:
-    score += 5
 
-  if net_foreign_val > 1_000_000_000:
-    score += 10
-  elif net_foreign_val > 0:
-    score += 5
-
-  if turnover_mb >= 10.0:
-    score += 10
-  elif turnover_mb >= 2.0:
-    score += 5
-
-  if score >= 85:
+  if score >= 80:
     grade = 'S (STRONG BUY)'
-  elif score >= 70:
+  elif score >= 65:
     grade = 'A (HIGH PROBABILITY)'
   else:
     grade = 'B (MODERATE BUY)'
@@ -247,7 +205,7 @@ def calculate_signal_score(
 
 
 # ==========================================
-# 7. ANALISIS TEKNIKAL MULTI-INDIKATOR
+# 7. ANALISIS TEKNIKAL (FILTER DILONGGARKAN)
 # ==========================================
 def analyze_rafano_signals(ticker, stockbit_token):
   try:
@@ -273,12 +231,6 @@ def analyze_rafano_signals(ticker, stockbit_token):
     df['+DI'] = ta.trend.adx_pos(df['High'], df['Low'], df['Close'], window=14)
     df['-DI'] = ta.trend.adx_neg(df['High'], df['Low'], df['Close'], window=14)
 
-    macd = ta.trend.MACD(
-        df['Close'], window_slow=26, window_fast=12, window_sign=9
-    )
-    df['MACD'] = macd.macd()
-    df['MACD_Signal'] = macd.macd_signal()
-
     bb = ta.volatility.BollingerBands(df['Close'], window=20, window_dev=2)
     df['BB_Upper'] = bb.bollinger_hband()
 
@@ -286,7 +238,6 @@ def analyze_rafano_signals(ticker, stockbit_token):
     prev = df.iloc[-2]
 
     close_price = float(curr['Close'])
-    open_price = float(curr['Open'])
     prev_close = float(prev['Close'])
     ema50 = float(curr['EMA50'])
     volume_realtime = float(curr['Volume'])
@@ -297,10 +248,6 @@ def analyze_rafano_signals(ticker, stockbit_token):
     swing_low3 = float(curr['SwingLow3'])
 
     adx_val = float(curr['ADX'])
-    plus_di = float(curr['+DI'])
-    minus_di = float(curr['-DI'])
-    macd_line = float(curr['MACD'])
-    macd_signal = float(curr['MACD_Signal'])
     bb_upper = float(curr['BB_Upper'])
 
     projected_vol = calculate_projected_volume(volume_realtime)
@@ -312,27 +259,14 @@ def analyze_rafano_signals(ticker, stockbit_token):
     turnover_value = close_price * volume_realtime
     turnover_mb = round(turnover_value / 1_000_000_000, 2)
 
+    # --- FILTER UTAMA (DILONGGARKAN) ---
+    # Cukup pastikan harga di atas EMA 50, likuiditas wajar, dan RSI tidak jenuh beli ekstrem (>85)
     is_uptrend = close_price > ema50
-    is_green_candle = close_price > open_price
-    is_vol_spike = volume_ratio >= 1.5
-    is_momentum = price_change_pct >= 2.0
-    is_liquid = turnover_value >= 1_000_000_000
-    is_not_overbought = rsi14 < 75
-    is_strong_trend = adx_val >= 20 and plus_di > minus_di
-    is_macd_bullish = macd_line > macd_signal
-    is_bb_breakout = close_price >= bb_upper * 0.98
+    is_liquid = turnover_value >= 500_000_000  # Minimal transaksi 500 Juta
+    is_not_overbought = rsi14 < 85
 
-    if (
-        is_uptrend
-        and is_green_candle
-        and is_vol_spike
-        and is_momentum
-        and is_liquid
-        and is_not_overbought
-        and is_strong_trend
-        and is_macd_bullish
-        and is_bb_breakout
-    ):
+    if is_uptrend and is_liquid and is_not_overbought:
+      is_bb_breakout = close_price >= bb_upper * 0.95
       flow_text, net_foreign_val = check_stockbit_flow(ticker, stockbit_token)
 
       score, grade, progress_bar = calculate_signal_score(
@@ -345,15 +279,15 @@ def analyze_rafano_signals(ticker, stockbit_token):
           turnover_mb,
       )
 
-      stop_loss = round(swing_low3 * 0.99, 2)
-      max_sl_allowed = round(close_price * 0.95, 2)
+      stop_loss = round(swing_low3 * 0.98, 2)
+      max_sl_allowed = round(close_price * 0.93, 2)
       stop_loss = max(stop_loss, max_sl_allowed)
       sl_pct = round(((stop_loss - close_price) / close_price) * 100, 1)
 
       tp1_atr = close_price + (1.5 * atr14)
       tp1 = round(max(tp1_atr, res20), 2)
-      if tp1 <= close_price * 1.03:
-        tp1 = round(close_price * 1.04, 2)
+      if tp1 <= close_price * 1.02:
+        tp1 = round(close_price * 1.03, 2)
 
       tp2 = round(close_price + (3.0 * atr14), 2)
       tp1_pct = round(((tp1 - close_price) / close_price) * 100, 1)
@@ -394,7 +328,7 @@ def send_rafano_alert(data):
   ticker = data['ticker']
   chart_url = f'https://stockbit.com/symbol/{ticker}'
 
-  msg = f"""🔥 *RAFANO TRADER SIGNAL V9.5 (REALTIME API)*
+  msg = f"""🔥 *RAFANO TRADER SIGNAL V9.5 (RELAXED FILTER)*
 📊 Stock: [{ticker}]({chart_url}) *(Klik untuk Buka Chart)*
 
 🎯 *SIGNAL QUALITY SCORE*
@@ -404,22 +338,21 @@ def send_rafano_alert(data):
 📈 *PRICE ACTION & TREND (STOCKBIT LIVE)*
   • Close Price    : Rp {data['price']:,} (▲ +{data['change_pct']}%)
   • Trend Regime   : Above EMA 50 (Rp {data['ema50']:,}) ✓
-  • Bollinger Band : Upper BB Rp {data['bb_upper']:,} (Breakout)
-  • ADX (14)       : {data['adx']} (Strong Trend > 20) ✓
-  • RSI (14)       : {data['rsi']} (Ideal < 75) ✓
+  • ADX (14)       : {data['adx']}
+  • RSI (14)       : {data['rsi']}
 
 ───────────────
 📊 *ENGINE & ACCUMULATION*
   • Volatility ATR : Rp {data['atr']}
-  • Vol Projection : {data['volume_ratio']}x Vol Avg 20 ✓
+  • Vol Projection : {data['volume_ratio']}x Vol Avg 20
   • Turnover Value : Rp {data['turnover_mb']} Miliar
   • Accum Flow     : {data['foreign_status']}
 
 ───────────────
-🎯 *TRADING PLAN (SWING LOW SL & ATR TP)*
+🎯 *TRADING PLAN*
   • Entry Range    : Rp {data['price']:,}
-  • TP 1 (Res/ATR) : Rp {data['tp1']:,} (+{data['tp1_pct']}%)
-  • TP 2 (3x ATR)  : Rp {data['tp2']:,} (+{data['tp2_pct']}%)
+  • TP 1           : Rp {data['tp1']:,} (+{data['tp1_pct']}%)
+  • TP 2           : Rp {data['tp2']:,} (+{data['tp2_pct']}%)
   • Stop Loss      : Rp {data['stop_loss']:,} ({data['sl_pct']}%)
 
 ───────────────
@@ -444,8 +377,7 @@ def send_rafano_alert(data):
 # ==========================================
 def run_rafano_bot():
   print(
-      f'🚀 Running Rafano Trader Signal Engine V9.5 with Scoring (Stockbit Live'
-      f' x{MAX_WORKERS})...'
+      f'🚀 Running Rafano Trader Signal Engine (Relaxed Mode x{MAX_WORKERS})...'
   )
 
   stockbit_token = get_stockbit_token()
@@ -469,8 +401,8 @@ def run_rafano_bot():
           send_rafano_alert(signal)
           signals_found += 1
           print(
-              f'✅ Alert Real-Time terkirim untuk {ticker} (Score:'
-              f' {signal["score"]}/100 - {signal["grade"]})'
+              f'✅ Alert terkirim untuk {ticker} (Score: {signal["score"]}/100'
+              f' - {signal["grade"]})'
           )
       except Exception as e:
         print(f'❌ Error processing {ticker}: {e}')
