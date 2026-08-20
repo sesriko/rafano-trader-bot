@@ -1,3 +1,7 @@
 requests
 pandas
 ta
+matplotlib
+numpy
+pytz
+yfinance
