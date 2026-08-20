@@ -17,6 +17,8 @@ jobs:
     steps:
     - name: Checkout Repository Code
       uses: actions/checkout@v4
+      with:
+        ref: 'main'
 
     - name: Set up Python Environment
       uses: actions/setup-python@v5
@@ -28,7 +30,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - - name: Run Both Bots
+    - name: Run Both Bots
       env:
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
