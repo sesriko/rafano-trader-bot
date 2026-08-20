@@ -2,7 +2,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, time
 import os
 import pandas as pd
-import requests
+
+try:
+  from tradingview_ta import Analysis, Interval, TA_Handler
+except ImportError:
+  os.system('pip install tradingview-ta ta')
+  from tradingview_ta import Analysis, Interval, TA_Handler
 
 try:
   import ta
@@ -11,193 +16,42 @@ except ImportError:
   import ta
 
 # ==========================================
-# 1. KONFIGURASI KREDENSIAL & ENVIRONMENT
+# 1. KONFIGURASI KREDENSIAL & TELEGRAM
 # ==========================================
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
-STOCKBIT_USERNAME = os.getenv('STOCKBIT_USERNAME')
-STOCKBIT_PASSWORD = os.getenv('STOCKBIT_PASSWORD')
-
 MAX_WORKERS = 15
 
-BASE_HEADERS = {
-    'User-Agent': (
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        ' (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    ),
-    'Content-Type': 'application/json',
-    'Accept': 'application/json',
-}
-
 
 # ==========================================
-# 2. STOCKBIT AUTHENTICATION ENGINE
-# ==========================================
-def get_stockbit_token():
-  if not STOCKBIT_USERNAME or not STOCKBIT_PASSWORD:
-    print('⚠️ [STOCKBIT] Credentials belum diset. Menggunakan Guest Mode.')
-    return None
-
-  login_url = 'https://api.stockbit.com/v2.4/login'
-  payload = {'username': STOCKBIT_USERNAME, 'password': STOCKBIT_PASSWORD}
-
-  try:
-    response = requests.post(
-        login_url, json=payload, headers=BASE_HEADERS, timeout=10
-    )
-    if response.status_code == 200:
-      token = response.json().get('data', {}).get('token')
-      if token:
-        print('✅ [STOCKBIT] Auto-Login Berhasil!')
-        return token
-  except Exception as e:
-    print(f'❌ [STOCKBIT] Error Login: {e}')
-
-  return None
-
-
-# ==========================================
-# 3. STOCKBIT DATA FETCHERS
-# ==========================================
-def get_stockbit_kline(symbol, token):
-  url = f'https://api.stockbit.com/v2.4/chart/kline?symbol={symbol}&resolution=D&limit=100'
-  headers = BASE_HEADERS.copy()
-  if token:
-    headers['Authorization'] = f'Bearer {token}'
-
-  try:
-    res = requests.get(url, headers=headers, timeout=8)
-    if res.status_code == 200:
-      raw_data = res.json().get('data', [])
-      if not raw_data:
-        return None
-
-      df = pd.DataFrame(raw_data)
-      df.rename(
-          columns={
-              't': 'Timestamp',
-              'o': 'Open',
-              'h': 'High',
-              'l': 'Low',
-              'c': 'Close',
-              'v': 'Volume',
-          },
-          inplace=True,
-      )
-
-      df['Date'] = pd.to_datetime(df['Timestamp'], unit='s')
-      df.set_index('Date', inplace=True)
-      return df
-  except Exception:
-    pass
-  return None
-
-
-def check_stockbit_flow(symbol, token):
-  if not token:
-    return 'N/A (Public Mode)', 0
-
-  url = f'https://api.stockbit.com/v2.4/foreignflow/{symbol}'
-  headers = BASE_HEADERS.copy()
-  headers['Authorization'] = f'Bearer {token}'
-
-  net_foreign_val = 0
-  try:
-    res = requests.get(url, headers=headers, timeout=5)
-    if res.status_code == 200:
-      net_foreign_val = res.json().get('data', {}).get('net_foreign_val', 0)
-  except Exception:
-    pass
-
-  if net_foreign_val > 0:
-    return f'NET BUY (+Rp {round(net_foreign_val / 1e9, 2)}B)', net_foreign_val
-  elif net_foreign_val < 0:
-    return (
-        f'NET SELL (-Rp {round(abs(net_foreign_val) / 1e9, 2)}B)',
-        net_foreign_val,
-    )
-
-  return 'NEUTRAL / BANDAR ACCUM', 0
-
-
-# ==========================================
-# 4. INTRADAY VOLUME PROJECTION
-# ==========================================
-def calculate_projected_volume(current_volume):
-  now = datetime.now().time()
-  t_start_s1, t_end_s1 = time(9, 0), time(12, 0)
-  t_start_s2, t_end_s2 = time(13, 30), time(16, 0)
-
-  elapsed_minutes = 0
-  if now < t_start_s1:
-    return current_volume
-  elif t_start_s1 <= now <= t_end_s1:
-    elapsed_minutes = (now.hour - 9) * 60 + now.minute
-  elif t_end_s1 < now < t_start_s2:
-    elapsed_minutes = 180
-  elif t_start_s2 <= now <= t_end_s2:
-    elapsed_minutes = 180 + ((now.hour - 13) * 60 + now.minute - 30)
-  else:
-    return current_volume
-
-  if elapsed_minutes < 15:
-    return current_volume
-
-  projection_factor = 420.0 / elapsed_minutes
-  return current_volume * projection_factor
-
-
-# ==========================================
-# 5. AUTO-FETCH ALL IHSG STOCKS (100% INTERNAL 300+ LIST)
+# 2. DAFTAR EMITEN IHSG LENGKAP & AKTIF
 # ==========================================
 def get_all_ihsg_stocks():
-  fallback_stocks = [
+  stocks = [
       'AALI',
       'ABMM',
       'ACES',
-      'ACST',
       'ADMR',
       'ADRO',
       'AGII',
       'AGRO',
       'AKRA',
-      'AKSI',
-      'ALKA',
-      'ALMI',
       'AMAR',
       'AMFG',
-      'AMIN',
-      'AMMS',
       'AMRT',
-      'ANDI',
       'ANJT',
       'ANTM',
-      'APEX',
-      'APIC',
       'APLN',
       'ARCI',
-      'ARKA',
       'ARKO',
       'ARNA',
-      'ARTA',
-      'ARTI',
       'ARTO',
-      'ASBI',
-      'ASDM',
-      'ASEM',
-      'ASGR',
       'ASII',
-      'ASJT',
-      'ASPI',
       'ASRI',
-      'ATAP',
       'AUTO',
       'BABP',
       'BACA',
-      'BAIK',
-      'BANK',
-      'BAUT',
       'BBCA',
       'BBHI',
       'BBKP',
@@ -206,579 +60,173 @@ def get_all_ihsg_stocks():
       'BBTN',
       'BBYB',
       'BCAP',
-      'BCIC',
       'BDMN',
-      'BEKS',
       'BELI',
-      'BELL',
-      'BESS',
       'BEST',
-      'BGTG',
-      'BIKA',
-      'BINA',
-      'BINO',
-      'BIPI',
       'BIRD',
       'BISI',
       'BJBR',
       'BJTM',
-      'BKDP',
       'BKSL',
-      'BLTZ',
-      'BLUE',
       'BMAS',
-      'BMHS',
       'BMRI',
       'BNBA',
       'BNGA',
       'BNII',
-      'BNLI',
-      'BOBA',
-      'BOGA',
-      'BOLA',
-      'BOLT',
-      'BOSS',
-      'BPTR',
-      'BRAM',
       'BRIS',
       'BRMS',
       'BRPT',
       'BSDE',
-      'BSIM',
       'BSSR',
-      'BSWD',
-      'BTEK',
       'BTPS',
       'BUKA',
-      'BUKK',
       'BULL',
       'BUMI',
-      'BUVA',
       'BVIC',
       'BWPT',
       'BYAN',
-      'CAKK',
       'CARS',
-      'CASA',
-      'CASH',
-      'CASS',
-      'CBRE',
-      'CEKA',
-      'CENT',
-      'CFIN',
-      'CINT',
-      'CITA',
-      'CITY',
-      'CLPI',
-      'CMNP',
-      'CMPP',
-      'CMRY',
-      'CNMA',
-      'COAL',
-      'COIN',
-      'COLL',
-      'COMP',
+      'CPRO',
       'CPIN',
       'CSAP',
-      'CSIS',
       'CTRA',
-      'CPRO',
       'DADA',
-      'DAST',
-      'DEAL',
       'DEWI',
-      'DFAM',
-      'DGNS',
-      'DIGI',
       'DILD',
-      'DIVA',
-      'DKFT',
       'DMAS',
-      'DMMX',
-      'DNAR',
       'DOID',
-      'DSFI',
       'DSNG',
       'DSSA',
-      'DUCK',
-      'DVLA',
-      'DWGL',
-      'EAST',
-      'ECII',
-      'EDGE',
-      'EDMS',
       'ELSA',
-      'ELIT',
       'EMTK',
       'ENRG',
-      'ENAK',
-      'EPAC',
-      'EPMT',
       'ERAA',
-      'ERTX',
-      'ESIP',
       'ESSA',
-      'ESTA',
-      'ESTI',
       'EXCL',
-      'FAPA',
       'FASW',
       'FILM',
-      'FIRT',
-      'FIRE',
-      'FISH',
-      'FITT',
-      'FLMC',
-      'FMII',
-      'FOLK',
-      'FOOD',
       'FPNI',
       'FREN',
       'FUTR',
-      'GAMA',
-      'GDST',
-      'GEMA',
       'GEMS',
-      'GGRP',
       'GIAA',
       'GJTL',
-      'GLVA',
       'GMFI',
-      'GMTD',
       'GOLD',
       'GOTO',
       'GPRA',
-      'GPSO',
-      'GRPH',
-      'GREN',
-      'GRIA',
       'GTBO',
-      'GTSI',
-      'GULA',
-      'GUNA',
-      'GWSA',
-      'HADE',
-      'HAIS',
-      'HALO',
-      'HDIT',
       'HEAL',
-      'HELI',
       'HERO',
       'HEXA',
-      'HITS',
-      'HKMU',
       'HMSP',
-      'HOME',
-      'HOMI',
-      'HOPE',
-      'HRME',
       'HRUM',
       'IATA',
-      'IBFN',
-      'IBST',
       'ICBP',
-      'ICON',
-      'IDEA',
-      'IDPR',
-      'IFII',
-      'IFSH',
-      'IGAR',
-      'IIKP',
-      'IKAN',
-      'IKAI',
-      'IKPN',
       'IMAS',
-      'IMJS',
       'IMPC',
       'INAF',
-      'INAI',
-      'INCI',
       'INCO',
       'INDF',
-      'INDR',
       'INKP',
-      'INPC',
-      'INPP',
-      'INRU',
       'INTP',
       'IPCC',
-      'IPCM',
-      'IPEH',
-      'IPOL',
       'ISAT',
       'ISSP',
-      'ITMA',
       'ITMG',
-      'JAYA',
-      'JGLE',
-      'JIHD',
-      'JKON',
       'JPFA',
       'JSMR',
-      'JSPT',
-      'JTPE',
       'KAEF',
-      'KARW',
-      'KAYU',
-      'KBLI',
-      'KBLM',
-      'KDTN',
-      'KEEN',
-      'KEJU',
-      'KETR',
-      'KIAS',
-      'KICI',
-      'KIJA',
-      'KINO',
       'KKGI',
       'KLBF',
-      'KMDS',
-      'KMTR',
-      'KOBX',
-      'KOIN',
       'KOPI',
-      'KOTA',
       'KPIG',
-      'KRAH',
-      'KUAS',
-      'LABS',
-      'LAND',
-      'LAPD',
-      'LCKM',
       'LEAD',
-      'LIFE',
-      'LINK',
-      'LION',
-      'LMAS',
-      'LPCK',
-      'LPGI',
-      'LPIN',
       'LPPF',
-      'LPPS',
-      'LRNA',
       'LSIP',
-      'LTLS',
-      'LUCK',
-      'MABA',
-      'MAGP',
-      'MAIN',
-      'MAPA',
       'MAPI',
-      'MARI',
       'MBAP',
-      'MBSS',
-      'MBTO',
-      'MCOR',
       'MDKA',
-      'MDLA',
-      'MDMK',
       'MEDC',
       'MEGA',
-      'MEJA',
-      'MENN',
-      'MERK',
-      'META',
-      'MFMI',
-      'MGLV',
-      'MGRO',
-      'MIDI',
-      'MINA',
-      'MIRA',
-      'MITI',
-      'MKNT',
-      'MKPI',
-      'MLBI',
-      'MLIA',
+      'MIKA',
       'MLPL',
-      'MLPT',
-      'MMIX',
-      'MNCK',
       'MNCN',
-      'MOLI',
       'MPMX',
-      'MPRO',
-      'MPPA',
-      'MRAT',
-      'MSTI',
-      'MTDL',
       'MTEL',
-      'MTFN',
-      'MTPS',
-      'MTRY',
-      'MYOH',
       'MYOR',
-      'MYRX',
-      'NANO',
-      'NASA',
-      'NASC',
       'NCKL',
-      'NEO',
-      'NETV',
-      'NICK',
-      'NICO',
-      'NIKL',
-      'NINE',
+      'NICL',
+      'NIKI',
       'NOBU',
-      'NPGF',
-      'NRCA',
-      'NUSA',
-      'NZIA',
-      'OASA',
-      'OBMD',
-      'OCAP',
-      'OKAS',
-      'OMRE',
-      'PADA',
-      'PAMG',
       'PANI',
-      'PANR',
-      'PBRX',
-      'PDES',
-      'PEHA',
       'PGAS',
       'PGEO',
-      'PGLI',
-      'PGJO',
-      'PICO',
-      'PJAA',
-      'PKPK',
-      'PLAS',
-      'PMJS',
       'PNBN',
-      'PNBS',
-      'PNGO',
-      'PNIN',
       'PNLF',
-      'POLA',
-      'POLI',
-      'POLL',
-      'POLU',
-      'POLY',
-      'POOL',
-      'PORT',
-      'POSA',
-      'POWR',
-      'PPRO',
-      'PRDA',
-      'PSAB',
-      'PSDN',
-      'PSGO',
-      'PSSI',
       'PTBA',
-      'PTDU',
-      'PTMP',
-      'PTPW',
       'PTRO',
-      'PUDP',
-      'PURA',
       'PWON',
-      'PYFA',
-      'RAJA',
       'RALS',
-      'RANC',
-      'RBMS',
-      'RDTX',
-      'REAL',
-      'RELI',
-      'RICY',
-      'RIGS',
-      'RISE',
       'RMKE',
-      'ROCK',
       'ROTI',
-      'RUIS',
-      'RUNS',
-      'SAFE',
-      'SAGE',
-      'SAID',
-      'SAME',
-      'SAMF',
-      'SAPX',
-      'SATU',
-      'SBAT',
-      'SBMA',
-      'SCCO',
-      'SCNP',
       'SCMA',
-      'SDMU',
-      'SDPC',
-      'SDRA',
-      'SEMA',
-      'SFAN',
-      'SGER',
-      'SICO',
       'SIDO',
       'SILO',
       'SIMP',
-      'SKLT',
-      'SKRN',
-      'SKYB',
-      'SMAR',
-      'SMBR',
-      'SMCB',
       'SMDR',
       'SMGR',
-      'SMIL',
-      'SMKM',
-      'SMMA',
-      'SMMT',
       'SMRA',
-      'SNLK',
       'SOCI',
-      'SOFA',
-      'SOLA',
-      'SONA',
-      'SOSS',
-      'SOTS',
-      'SPMA',
-      'SPTO',
-      'SRIL',
-      'SRSN',
       'SSIA',
-      'SSTM',
       'STAA',
-      'STAR',
-      'STRK',
-      'STTP',
-      'SULI',
-      'SUNI',
-      'SUPR',
-      'SURE',
-      'SWID',
-      'TALF',
-      'TAMA',
-      'TAPG',
-      'TARA',
-      'TAXI',
       'TBIG',
       'TBLA',
-      'TBMS',
-      'TCID',
-      'TCPI',
-      'TEBE',
-      'TECH',
-      'TELE',
-      'TFAS',
-      'TGKA',
-      'TGRA',
-      'TIFA',
       'TINS',
-      'TIRA',
-      'TIRT',
       'TKIM',
       'TLKM',
       'TMAS',
-      'TMPO',
-      'TNCA',
-      'TOBA',
-      'TOOL',
-      'TOPS',
-      'TOSK',
-      'TOTL',
       'TOWR',
       'TPIA',
-      'TPMA',
-      'TRIN',
       'TRIS',
-      'TRJA',
-      'TRUK',
-      'TSPC',
-      'TUGU',
-      'TYRE',
-      'UANG',
       'ULTJ',
-      'UNIC',
-      'UNIQ',
       'UNTR',
       'UNVR',
-      'USER',
-      'VICO',
-      'VINS',
-      'VIVA',
       'VKTR',
-      'VOKS',
-      'VTNY',
-      'WAGE',
-      'WAPO',
-      'WEHA',
-      'WEGE',
-      'WICO',
       'WIFI',
       'WIIM',
       'WIKA',
       'WINS',
-      'WIRG',
-      'WMPP',
-      'WMUU',
-      'WOMF',
-      'WOOD',
-      'WOWS',
-      'WSBP',
       'WSKT',
-      'WTON',
-      'XADO',
-      'XBNI',
-      'XBSL',
-      'XCID',
-      'XIML',
-      'XIPI',
-      'XISC',
-      'XIIT',
-      'XLBF',
-      'XPDN',
-      'XPES',
-      'XPLN',
-      'XPRO',
-      'XPSG',
-      'XTAN',
-      'XVIP',
-      'YELO',
-      'YOII',
-      'YPAS',
-      'YULE',
-      'ZATA',
-      'ZBRA',
-      'ZINC',
-      'ZYRX',
   ]
-  print(
-      f'✅ [IHSG ENGINE] Memuat total {len(fallback_stocks)} emiten aktif secara'
-      ' langsung.'
-  )
-  return fallback_stocks
+  return sorted(list(set(stocks)))
 
 
 # ==========================================
-# 6. SIGNAL SCORING ENGINE (DILONGGARKAN)
+# 3. SCALPING SCORING ENGINE
 # ==========================================
-def calculate_signal_score(
-    vol_ratio,
-    adx_val,
-    rsi14,
-    price_change_pct,
-    is_bb_breakout,
-    net_foreign_val,
-    turnover_mb,
+def calculate_scalp_score(
+    vol_ratio, price_change_pct, turnover_mb, is_green_candle
 ):
-  score = 50
+  score = 40
 
-  if vol_ratio >= 1.2:
+  if is_green_candle:
     score += 15
-  if price_change_pct >= 0.5:
+  if price_change_pct >= 1.0:
     score += 15
-  if adx_val >= 15:
+  if price_change_pct >= 3.0:
     score += 10
-  if is_bb_breakout:
+  if vol_ratio >= 1.5:
     score += 10
-  if turnover_mb >= 0.5:
+  if turnover_mb >= 1.0:
     score += 10
 
   if score >= 80:
-    grade = 'S (STRONG BUY)'
+    grade = '🔥 SCALP A+ (HIGH MOMENTUM)'
   elif score >= 65:
-    grade = 'A (HIGH PROBABILITY)'
+    grade = '⚡ SCALP A (GOOD MOMENTUM)'
   else:
-    grade = 'B (MODERATE BUY)'
+    grade = '📈 SCALP B (WATCHLIST)'
 
   filled_blocks = int(round(score / 10))
   progress_bar = '█' * filled_blocks + '░' * (10 - filled_blocks)
@@ -787,89 +235,64 @@ def calculate_signal_score(
 
 
 # ==========================================
-# 7. ANALISIS TEKNIKAL (FILTER DILONGGARKAN)
+# 4. ANALISIS TRADINGVIEW & EMA 200/50
 # ==========================================
-def analyze_rafano_signals(ticker, stockbit_token):
+def analyze_autoscan_signals(ticker):
   try:
-    df = get_stockbit_kline(ticker, stockbit_token)
-    if df is None or len(df) < 50:
+    handler = TA_Handler(
+        symbol=ticker,
+        exchange='IDX',
+        screener='indonesia',
+        interval=Interval.INTERVAL_1_DAY,
+    )
+
+    analysis = handler.get_analysis()
+    indicators = analysis.indicators
+
+    close_price = float(indicators.get('close', 0))
+    open_price = float(indicators.get('open', 0))
+    volume = float(indicators.get('volume', 0))
+    vol_sma20 = float(indicators.get('SMA20', volume))
+
+    # EMA Major 200 & EMA Trigger 50
+    ema_major = float(indicators.get('EMA200', 0))
+    ema_trigger = float(indicators.get('EMA50', 0))
+
+    if close_price <= 0 or ema_major <= 0 or ema_trigger <= 0:
       return None
 
-    df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
-    df['Vol_Avg20'] = df['Volume'].rolling(window=20).mean()
-
-    df['ATR14'] = ta.volatility.average_true_range(
-        df['High'], df['Low'], df['Close'], window=14
+    change_from_open = (
+        ((close_price - open_price) / open_price) * 100
+        if open_price > 0
+        else 0.0
     )
-    df['Resistance20'] = df['High'].rolling(window=20).max()
-    df['SwingLow3'] = df['Low'].rolling(window=3).min()
+    price_change_pct = round(change_from_open, 2)
 
-    delta = df['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-    df['RSI14'] = 100 - (100 / (1 + (gain / loss)))
-
-    df['ADX'] = ta.trend.adx(df['High'], df['Low'], df['Close'], window=14)
-    df['+DI'] = ta.trend.adx_pos(df['High'], df['Low'], df['Close'], window=14)
-    df['-DI'] = ta.trend.adx_neg(df['High'], df['Low'], df['Close'], window=14)
-
-    bb = ta.volatility.BollingerBands(df['Close'], window=20, window_dev=2)
-    df['BB_Upper'] = bb.bollinger_hband()
-
-    curr = df.iloc[-1]
-    prev = df.iloc[-2]
-
-    close_price = float(curr['Close'])
-    prev_close = float(prev['Close'])
-    ema50 = float(curr['EMA50'])
-    volume_realtime = float(curr['Volume'])
-    vol_avg = float(curr['Vol_Avg20'])
-    rsi14 = float(curr['RSI14'])
-    atr14 = float(curr['ATR14'])
-    res20 = float(prev['Resistance20'])
-    swing_low3 = float(curr['SwingLow3'])
-
-    adx_val = float(curr['ADX'])
-    bb_upper = float(curr['BB_Upper'])
-
-    projected_vol = calculate_projected_volume(volume_realtime)
-    volume_ratio = round(projected_vol / vol_avg, 2) if vol_avg > 0 else 1.0
-
-    price_change_pct = round(
-        ((close_price - prev_close) / prev_close) * 100, 2
-    )
-    turnover_value = close_price * volume_realtime
+    turnover_value = close_price * volume
     turnover_mb = round(turnover_value / 1_000_000_000, 2)
+    volume_ratio = round(volume / vol_sma20, 2) if vol_sma20 > 0 else 1.0
 
-    is_uptrend = close_price > ema50
-    is_liquid = turnover_value >= 500_000_000
-    is_not_overbought = rsi14 < 85
+    is_green_candle = close_price >= open_price
 
-    if is_uptrend and is_liquid and is_not_overbought:
-      is_bb_breakout = close_price >= bb_upper * 0.95
-      flow_text, net_foreign_val = check_stockbit_flow(ticker, stockbit_token)
+    # Sesuai Aturan: Di atas EMA Major 200 dan EMA Trigger 50
+    is_uptrend = close_price > ema_major and close_price > ema_trigger
+    is_active_moving = (
+        price_change_pct >= 0.5
+        and turnover_value >= 100_000_000
+        and is_uptrend
+    )
 
-      score, grade, progress_bar = calculate_signal_score(
-          vol_ratio,
-          adx_val,
-          rsi14,
-          price_change_pct,
-          is_bb_breakout,
-          net_foreign_val,
-          turnover_mb,
+    if is_active_moving:
+      score, grade, progress_bar = calculate_scalp_score(
+          volume_ratio, price_change_pct, turnover_mb, is_green_candle
       )
 
-      stop_loss = round(swing_low3 * 0.98, 2)
-      max_sl_allowed = round(close_price * 0.93, 2)
-      stop_loss = max(stop_loss, max_sl_allowed)
+      approx_atr = close_price * 0.015
+      stop_loss = round(close_price - (1.0 * approx_atr), 2)
+      tp1 = round(close_price + (1.0 * approx_atr), 2)
+      tp2 = round(close_price + (2.0 * approx_atr), 2)
+
       sl_pct = round(((stop_loss - close_price) / close_price) * 100, 1)
-
-      tp1_atr = close_price + (1.5 * atr14)
-      tp1 = round(max(tp1_atr, res20), 2)
-      if tp1 <= close_price * 1.02:
-        tp1 = round(close_price * 1.03, 2)
-
-      tp2 = round(close_price + (3.0 * atr14), 2)
       tp1_pct = round(((tp1 - close_price) / close_price) * 100, 1)
       tp2_pct = round(((tp2 - close_price) / close_price) * 100, 1)
 
@@ -879,18 +302,12 @@ def analyze_rafano_signals(ticker, stockbit_token):
           'change_pct': price_change_pct,
           'volume_ratio': volume_ratio,
           'turnover_mb': turnover_mb,
-          'rsi': round(rsi14, 2),
-          'adx': round(adx_val, 2),
-          'ema50': round(ema50, 2),
-          'bb_upper': round(bb_upper, 2),
-          'foreign_status': flow_text,
           'stop_loss': stop_loss,
           'sl_pct': sl_pct,
           'tp1': tp1,
           'tp1_pct': tp1_pct,
           'tp2': tp2,
           'tp2_pct': tp2_pct,
-          'atr': round(atr14, 2),
           'score': score,
           'grade': grade,
           'progress_bar': progress_bar,
@@ -902,41 +319,33 @@ def analyze_rafano_signals(ticker, stockbit_token):
 
 
 # ==========================================
-# 8. PENGIRIMAN ALERT TELEGRAM
+# 5. KIRIM ALERT TELEGRAM
 # ==========================================
-def send_rafano_alert(data):
+def send_autoscan_alert(data):
   ticker = data['ticker']
   chart_url = f'https://stockbit.com/symbol/{ticker}'
 
-  msg = f"""🔥 *RAFANO TRADER SIGNAL V9.5 (RELAXED FILTER)*
-📊 Stock: [{ticker}]({chart_url}) *(Klik untuk Buka Chart)*
+  msg = f"""⚡ *RAFANO AUTOSCAN RADAR*
+📊 Stock: [{ticker}]({chart_url}) *(Buka Chart)*
 
-🎯 *SIGNAL QUALITY SCORE*
+🎯 *SCALP SCORE*
   • **Score** : `{data['score']} / 100` [{data['progress_bar']}]
   • **Grade** : `{data['grade']}`
 
-📈 *PRICE ACTION & TREND (STOCKBIT LIVE)*
-  • Close Price    : Rp {data['price']:,} (▲ +{data['change_pct']}%)
-  • Trend Regime   : Above EMA 50 (Rp {data['ema50']:,}) ✓
-  • ADX (14)       : {data['adx']}
-  • RSI (14)       : {data['rsi']}
+📈 *MOMENTUM LIVE*
+  • Price         : Rp {data['price']:,} (▲ +{data['change_pct']}%)
+  • Vol Ratio     : {data['volume_ratio']}x Vol SMA
+  • Turnover      : Rp {data['turnover_mb']} Miliar
 
 ───────────────
-📊 *ENGINE & ACCUMULATION*
-  • Volatility ATR : Rp {data['atr']}
-  • Vol Projection : {data['volume_ratio']}x Vol Avg 20
-  • Turnover Value : Rp {data['turnover_mb']} Miliar
-  • Accum Flow     : {data['foreign_status']}
+🎯 *SCALPING QUICK PLAN*
+  • Buy/Entry     : Rp {data['price']:,}
+  • Target 1 (TP1): Rp {data['tp1']:,} (+{data['tp1_pct']}%)
+  • Target 2 (TP2): Rp {data['tp2']:,} (+{data['tp2_pct']}%)
+  • Fast Stop Loss: Rp {data['stop_loss']:,} ({data['sl_pct']}%)
 
 ───────────────
-🎯 *TRADING PLAN*
-  • Entry Range    : Rp {data['price']:,}
-  • TP 1           : Rp {data['tp1']:,} (+{data['tp1_pct']}%)
-  • TP 2           : Rp {data['tp2']:,} (+{data['tp2_pct']}%)
-  • Stop Loss      : Rp {data['stop_loss']:,} ({data['sl_pct']}%)
-
-───────────────
-⚠️ *Rafano Trading Signal System.*"""
+⚠️ *Fast Execution & Strict Risk Management.*"""
 
   url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage'
   payload = {
@@ -947,29 +356,29 @@ def send_rafano_alert(data):
   }
 
   try:
+    import requests
+
     requests.post(url, json=payload, timeout=5)
   except Exception as e:
     print(f'Gagal kirim Telegram alert untuk {ticker}: {e}')
 
 
 # ==========================================
-# 9. EKSEKUSI UTAMA (MULTITHREADED MAIN)
+# 6. EKSEKUSI UTAMA
 # ==========================================
-def run_rafano_bot():
+def run_autoscan_bot():
   print(
-      f'🚀 Running Rafano Trader Signal Engine (Relaxed Mode x{MAX_WORKERS})...'
+      f'🚀 Running Rafano Autoscan TradingView Engine (Fast Scanner'
+      f' x{MAX_WORKERS})...'
   )
 
-  stockbit_token = get_stockbit_token()
   watchlist = get_all_ihsg_stocks()
-  print(f'🔍 Scanning {len(watchlist)} saham IHSG secara paralel...')
+  print(f'🔍 Scanning {len(watchlist)} emiten IDX via TradingView...')
   signals_found = 0
 
   with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
     future_to_ticker = {
-        executor.submit(
-            analyze_rafano_signals, ticker, stockbit_token
-        ): ticker
+        executor.submit(analyze_autoscan_signals, ticker): ticker
         for ticker in watchlist
     }
 
@@ -978,17 +387,17 @@ def run_rafano_bot():
       try:
         signal = future.result()
         if signal:
-          send_rafano_alert(signal)
+          send_autoscan_alert(signal)
           signals_found += 1
           print(
-              f'✅ Alert terkirim untuk {ticker} (Score: {signal["score"]}/100'
-              f' - {signal["grade"]})'
+              f'✅ Autoscan Alert terkirim untuk {ticker} (Score:'
+              f' {signal["score"]}/100)'
           )
       except Exception as e:
         print(f'❌ Error processing {ticker}: {e}')
 
-  print(f'🏁 Scanning Selesai. Total Sinyal Ditemukan: {signals_found}')
+  print(f'🏁 Scan Selesai. Total Sinyal Ditemukan: {signals_found}')
 
 
 if __name__ == '__main__':
-  run_rafano_bot()
+  run_autoscan_bot()
