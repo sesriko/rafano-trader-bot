@@ -149,7 +149,7 @@ def calculate_projected_volume(current_volume):
 
 
 # ==========================================
-# 5. AUTO-FETCH ALL IHSG STOCKS (300+ EMITEN AKTIF)
+# 5. AUTO-FETCH ALL IHSG STOCKS (100% INTERNAL 300+ LIST)
 # ==========================================
 def get_all_ihsg_stocks():
   fallback_stocks = [
@@ -272,7 +272,7 @@ def get_all_ihsg_stocks():
       'CLPI',
       'CMNP',
       'CMPP',
-      'CMRy',
+      'CMRY',
       'CNMA',
       'COAL',
       'COIN',
@@ -297,7 +297,6 @@ def get_all_ihsg_stocks():
       'DMMX',
       'DNAR',
       'DOID',
-      'DPum',
       'DSFI',
       'DSNG',
       'DSSA',
@@ -333,7 +332,6 @@ def get_all_ihsg_stocks():
       'FMII',
       'FOLK',
       'FOOD',
-      'FORE',
       'FPNI',
       'FREN',
       'FUTR',
@@ -411,7 +409,6 @@ def get_all_ihsg_stocks():
       'ISSP',
       'ITMA',
       'ITMG',
-      'Jatis',
       'JAYA',
       'JGLE',
       'JIHD',
@@ -439,12 +436,10 @@ def get_all_ihsg_stocks():
       'KMTR',
       'KOBX',
       'KOIN',
-      'KOKO',
       'KOPI',
       'KOTA',
       'KPIG',
       'KRAH',
-      'KRas',
       'KUAS',
       'LABS',
       'LAND',
@@ -486,7 +481,6 @@ def get_all_ihsg_stocks():
       'MFMI',
       'MGLV',
       'MGRO',
-      'Mika',
       'MIDI',
       'MINA',
       'MIRA',
@@ -514,7 +508,6 @@ def get_all_ihsg_stocks():
       'MYOH',
       'MYOR',
       'MYRX',
-      'Naga',
       'NANO',
       'NASA',
       'NASC',
@@ -525,7 +518,6 @@ def get_all_ihsg_stocks():
       'NICO',
       'NIKL',
       'NINE',
-      'Nipp',
       'NOBU',
       'NPGF',
       'NRCA',
@@ -594,7 +586,6 @@ def get_all_ihsg_stocks():
       'RMKE',
       'ROCK',
       'ROTI',
-      'ROIS',
       'RUIS',
       'RUNS',
       'SAFE',
@@ -687,7 +678,6 @@ def get_all_ihsg_stocks():
       'TOWR',
       'TPIA',
       'TPMA',
-      'TRada',
       'TRIN',
       'TRIS',
       'TRJA',
@@ -751,20 +741,10 @@ def get_all_ihsg_stocks():
       'ZINC',
       'ZYRX',
   ]
-
-  url = 'https://raw.githubusercontent.com/mfikria/idx-stocks/main/stocks.json'
-  try:
-    res = requests.get(url, timeout=10)
-    if res.status_code == 200:
-      data = res.json()
-      stocks = [item['ticker'] for item in data if len(item['ticker']) == 4]
-      if stocks:
-        print(f'✅ [IHSG ENGINE] Berhasil mengambil {len(stocks)} emiten IHSG!')
-        return stocks
-  except Exception as e:
-    print(f'⚠️ [IHSG ENGINE] Gagal fetch online, menggunakan database internal: {e}')
-
-  print(f'✅ [IHSG ENGINE] Memuat {len(fallback_stocks)} emiten aktif secara stabil.')
+  print(
+      f'✅ [IHSG ENGINE] Memuat total {len(fallback_stocks)} emiten aktif secara'
+      ' langsung.'
+  )
   return fallback_stocks
 
 
