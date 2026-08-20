@@ -19,7 +19,8 @@ TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 STOCKBIT_USERNAME = os.getenv('STOCKBIT_USERNAME')
 STOCKBIT_PASSWORD = os.getenv('STOCKBIT_PASSWORD')
 
-MAX_WORKERS = 15
+# Ditingkatkan agar scanning 300+ emiten selesai lebih cepat
+MAX_WORKERS = 35
 
 BASE_HEADERS = {
     'User-Agent': (
@@ -67,7 +68,7 @@ def get_stockbit_kline(symbol, token):
     headers['Authorization'] = f'Bearer {token}'
 
   try:
-    res = requests.get(url, headers=headers, timeout=8)
+    res = requests.get(url, headers=headers, timeout=6)
     if res.status_code == 200:
       raw_data = res.json().get('data', [])
       if not raw_data:
@@ -104,7 +105,7 @@ def check_stockbit_flow(symbol, token):
 
   net_foreign_val = 0
   try:
-    res = requests.get(url, headers=headers, timeout=5)
+    res = requests.get(url, headers=headers, timeout=4)
     if res.status_code == 200:
       net_foreign_val = res.json().get('data', {}).get('net_foreign_val', 0)
   except Exception:
@@ -149,7 +150,7 @@ def calculate_projected_volume(current_volume):
 
 
 # ==========================================
-# 5. AUTO-FETCH ALL IHSG STOCKS
+# 5. AUTO-FETCH ALL IHSG STOCKS (Dibatasi/Diambil ~300+ atau Sesuai Kebutuhan)
 # ==========================================
 def get_all_ihsg_stocks():
   url = 'https://raw.githubusercontent.com/mfikria/idx-stocks/main/stocks.json'
@@ -157,7 +158,13 @@ def get_all_ihsg_stocks():
     res = requests.get(url, timeout=10)
     if res.status_code == 200:
       data = res.json()
+      # Mengambil emiten dengan ticker 4 huruf (saham regular LQ45/Main Board/Development Board)
       stocks = [item['ticker'] for item in data if len(item['ticker']) == 4]
+      
+      # Jika ingin membatasi atau memastikan tepat mengambil sekitar 300 emiten teratas/terpilih:
+      # Anda bisa melakukan slicing misal: stocks[:300]
+      stocks = stocks[:300]
+      
       print(f'✅ [IHSG ENGINE] Berhasil mengambil {len(stocks)} emiten IHSG!')
       return stocks
   except Exception as e:
@@ -219,8 +226,8 @@ def analyze_scalping_signals(ticker, stockbit_token):
     open_price = float(curr['Open'])
     prev_close = float(prev['Close'])
     volume_realtime = float(curr['Volume'])
-    vol_avg = float(curr['Vol_Avg10'])
-    atr5 = float(curr['ATR5'])
+    vol_avg = float(df['Vol_Avg10'].iloc[-1])
+    atr5 = float(df['ATR5'].iloc[-1])
 
     projected_vol = calculate_projected_volume(volume_realtime)
     volume_ratio = round(projected_vol / vol_avg, 2) if vol_avg > 0 else 1.0
@@ -240,7 +247,6 @@ def analyze_scalping_signals(ticker, stockbit_token):
           volume_ratio, price_change_pct, turnover_mb, is_green_candle
       )
 
-      # Skema cepat scalping (TP ketat & SL cepat)
       stop_loss = round(close_price - (1.0 * atr5), 2)
       tp1 = round(close_price + (1.0 * atr5), 2)
       tp2 = round(close_price + (2.0 * atr5), 2)
