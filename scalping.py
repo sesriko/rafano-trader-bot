@@ -19,7 +19,6 @@ TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 STOCKBIT_USERNAME = os.getenv('STOCKBIT_USERNAME')
 STOCKBIT_PASSWORD = os.getenv('STOCKBIT_PASSWORD')
 
-# Ditingkatkan agar scanning 300+ emiten selesai lebih cepat
 MAX_WORKERS = 35
 
 BASE_HEADERS = {
@@ -150,27 +149,79 @@ def calculate_projected_volume(current_volume):
 
 
 # ==========================================
-# 5. AUTO-FETCH ALL IHSG STOCKS (Dibatasi/Diambil ~300+ atau Sesuai Kebutuhan)
+# 5. AUTO-FETCH ALL IHSG STOCKS (INTERNAL LIST)
 # ==========================================
 def get_all_ihsg_stocks():
-  url = 'https://raw.githubusercontent.com/mfikria/idx-stocks/main/stocks.json'
-  try:
-    res = requests.get(url, timeout=10)
-    if res.status_code == 200:
-      data = res.json()
-      # Mengambil emiten dengan ticker 4 huruf (saham regular LQ45/Main Board/Development Board)
-      stocks = [item['ticker'] for item in data if len(item['ticker']) == 4]
-      
-      # Jika ingin membatasi atau memastikan tepat mengambil sekitar 300 emiten teratas/terpilih:
-      # Anda bisa melakukan slicing misal: stocks[:300]
-      stocks = stocks[:300]
-      
-      print(f'✅ [IHSG ENGINE] Berhasil mengambil {len(stocks)} emiten IHSG!')
-      return stocks
-  except Exception as e:
-    print(f'⚠️ [IHSG ENGINE] Gagal fetch data IHSG: {e}')
-
-  return ['FPNI', 'KAEF', 'GIAA', 'NIKL', 'FUTR', 'BBRI', 'BMRI', 'TLKM']
+  fallback_stocks = [
+      'AALI', 'ABMM', 'ACES', 'ACST', 'ADMR', 'ADRO', 'AGII', 'AGRO', 'AKRA',
+      'AKSI', 'ALKA', 'ALMI', 'AMAR', 'AMFG', 'AMIN', 'AMMS', 'AMRT', 'ANDI',
+      'ANJT', 'ANTM', 'APEX', 'APIC', 'APLN', 'ARCI', 'ARKA', 'ARKO', 'ARNA',
+      'ARTA', 'ARTI', 'ARTO', 'ASBI', 'ASDM', 'ASEM', 'ASGR', 'ASII', 'ASJT',
+      'ASPI', 'ASRI', 'ATAP', 'AUTO', 'BABP', 'BACA', 'BAIK', 'BANK', 'BAUT',
+      'BBCA', 'BBHI', 'BBKP', 'BBNI', 'BBRI', 'BBTN', 'BBYB', 'BCAP', 'BCIC',
+      'BDMN', 'BEKS', 'BELI', 'BELL', 'BESS', 'BEST', 'BGTG', 'BIKA', 'BINA',
+      'BINO', 'BIPI', 'BIRD', 'BISI', 'BJBR', 'BJTM', 'BKDP', 'BKSL', 'BLTZ',
+      'BLUE', 'BMAS', 'BMHS', 'BMRI', 'BNBA', 'BNGA', 'BNII', 'BNLI', 'BOBA',
+      'BOGA', 'BOLA', 'BOLT', 'BOSS', 'BPTR', 'BRAM', 'BRIS', 'BRMS', 'BRPT',
+      'BSDE', 'BSIM', 'BSSR', 'BSWD', 'BTEK', 'BTPS', 'BUKA', 'BUKK', 'BULL',
+      'BUMI', 'BUVA', 'BVIC', 'BWPT', 'BYAN', 'CAKK', 'CARS', 'CASA', 'CASH',
+      'CASS', 'CBRE', 'CEKA', 'CENT', 'CFIN', 'CINT', 'CITA', 'CITY', 'CLPI',
+      'CMNP', 'CMPP', 'CMRY', 'CNMA', 'COAL', 'COIN', 'COLL', 'COMP', 'CPIN',
+      'CSAP', 'CSIS', 'CTRA', 'CPRO', 'DADA', 'DAST', 'DEAL', 'DEWI', 'DFAM',
+      'DGNS', 'DIGI', 'DILD', 'DIVA', 'DKFT', 'DMAS', 'DMMX', 'DNAR', 'DOID',
+      'DSFI', 'DSNG', 'DSSA', 'DUCK', 'DVLA', 'DWGL', 'EAST', 'ECII', 'EDGE',
+      'EDMS', 'ELSA', 'ELIT', 'EMTK', 'ENRG', 'ENAK', 'EPAC', 'EPMT', 'ERAA',
+      'ERTX', 'ESIP', 'ESSA', 'ESTA', 'ESTI', 'EXCL', 'FAPA', 'FASW', 'FILM',
+      'FIRT', 'FIRE', 'FISH', 'FITT', 'FLMC', 'FMII', 'FOLK', 'FOOD', 'FPNI',
+      'FREN', 'FUTR', 'GAMA', 'GDST', 'GEMA', 'GEMS', 'GGRP', 'GIAA', 'GJTL',
+      'GLVA', 'GMFI', 'GMTD', 'GOLD', 'GOTO', 'GPRA', 'GPSO', 'GRPH', 'GREN',
+      'GRIA', 'GTBO', 'GTSI', 'GULA', 'GUNA', 'GWSA', 'HADE', 'HAIS', 'HALO',
+      'HDIT', 'HEAL', 'HELI', 'HERO', 'HEXA', 'HITS', 'HKMU', 'HMSP', 'HOME',
+      'HOMI', 'HOPE', 'HRME', 'HRUM', 'IATA', 'IBFN', 'IBST', 'ICBP', 'ICON',
+      'IDEA', 'IDPR', 'IFII', 'IFSH', 'IGAR', 'IIKP', 'IKAN', 'IKAI', 'IKPN',
+      'IMAS', 'IMJS', 'IMPC', 'INAF', 'INAI', 'INCI', 'INCO', 'INDF', 'INDR',
+      'INKP', 'INPC', 'INPP', 'INRU', 'INTP', 'IPCC', 'IPCM', 'IPEH', 'IPOL',
+      'ISAT', 'ISSP', 'ITMA', 'ITMG', 'JAYA', 'JGLE', 'JIHD', 'JKON', 'JPFA',
+      'JSMR', 'JSPT', 'JTPE', 'KAEF', 'KARW', 'KAYU', 'KBLI', 'KBLM', 'KDTN',
+      'KEEN', 'KEJU', 'KETR', 'KIAS', 'KICI', 'KIJA', 'KINO', 'KKGI', 'KLBF',
+      'KMDS', 'KMTR', 'KOBX', 'KOIN', 'KOPI', 'KOTA', 'KPIG', 'KRAH', 'KUAS',
+      'LABS', 'LAND', 'LAPD', 'LCKM', 'LEAD', 'LIFE', 'LINK', 'LION', 'LMAS',
+      'LPCK', 'LPGI', 'LPIN', 'LPPF', 'LPPS', 'LRNA', 'LSIP', 'LTLS', 'LUCK',
+      'MABA', 'MAGP', 'MAIN', 'MAPA', 'MAPI', 'MARI', 'MBAP', 'MBSS', 'MBTO',
+      'MCOR', 'MDKA', 'MDLA', 'MDMK', 'MEDC', 'MEGA', 'MEJA', 'MENN', 'MERK',
+      'META', 'MFMI', 'MGLV', 'MGRO', 'MIDI', 'MINA', 'MIRA', 'MITI', 'MKNT',
+      'MKPI', 'MLBI', 'MLIA', 'MLPL', 'MLPT', 'MMIX', 'MNCK', 'MNCN', 'MOLI',
+      'MPMX', 'MPRO', 'MPPA', 'MRAT', 'MSTI', 'MTDL', 'MTEL', 'MTFN', 'MTPS',
+      'MTRY', 'MYOH', 'MYOR', 'MYRX', 'NANO', 'NASA', 'NASC', 'NCKL', 'NEO',
+      'NETV', 'NICK', 'NICO', 'NIKL', 'NINE', 'NOBU', 'NPGF', 'NRCA', 'NUSA',
+      'NZIA', 'OASA', 'OBMD', 'OCAP', 'OKAS', 'OMRE', 'PADA', 'PAMG', 'PANI',
+      'PANR', 'PBRX', 'PDES', 'PEHA', 'PGAS', 'PGEO', 'PGLI', 'PGJO', 'PICO',
+      'PJAA', 'PKPK', 'PLAS', 'PMJS', 'PNBN', 'PNBS', 'PNGO', 'PNIN', 'PNLF',
+      'POLA', 'POLI', 'POLL', 'POLU', 'POLY', 'POOL', 'PORT', 'POSA', 'POWR',
+      'PPRO', 'PRDA', 'PSAB', 'PSDN', 'PSGO', 'PSSI', 'PTBA', 'PTDU', 'PTMP',
+      'PTPW', 'PTRO', 'PUDP', 'PURA', 'PWON', 'PYFA', 'RAJA', 'RALS', 'RANC',
+      'RBMS', 'RDTX', 'REAL', 'RELI', 'RICY', 'RIGS', 'RISE', 'RMKE', 'ROCK',
+      'ROTI', 'RUIS', 'RUNS', 'SAFE', 'SAGE', 'SAID', 'SAME', 'SAMF', 'SAPX',
+      'SATU', 'SBAT', 'SBMA', 'SCCO', 'SCNP', 'SCMA', 'SDMU', 'SDPC', 'SDRA',
+      'SEMA', 'SFAN', 'SGER', 'SICO', 'SIDO', 'SILO', 'SIMP', 'SKLT', 'SKRN',
+      'SKYB', 'SMAR', 'SMBR', 'SMCB', 'SMDR', 'SMGR', 'SMIL', 'SMKM', 'SMMA',
+      'SMMT', 'SMRA', 'SNLK', 'SOCI', 'SOFA', 'SOLA', 'SONA', 'SOSS', 'SOTS',
+      'SPMA', 'SPTO', 'SRIL', 'SRSN', 'SSIA', 'SSTM', 'STAA', 'STAR', 'STRK',
+      'STTP', 'SULI', 'SUNI', 'SUPR', 'SURE', 'SWID', 'TALF', 'TAMA', 'TAPG',
+      'TARA', 'TAXI', 'TBIG', 'TBLA', 'TBMS', 'TCID', 'TCPI', 'TEBE', 'TECH',
+      'TELE', 'TFAS', 'TGKA', 'TGRA', 'TIFA', 'TINS', 'TIRA', 'TIRT', 'TKIM',
+      'TLKM', 'TMAS', 'TMPO', 'TNCA', 'TOBA', 'TOOL', 'TOPS', 'TOSK', 'TOTL',
+      'TOWR', 'TPIA', 'TPMA', 'TRIN', 'TRIS', 'TRJA', 'TRUK', 'TSPC', 'TUGU',
+      'TYRE', 'UANG', 'ULTJ', 'UNIC', 'UNIQ', 'UNTR', 'UNVR', 'USER', 'VICO',
+      'VINS', 'VIVA', 'VKTR', 'VOKS', 'VTNY', 'WAGE', 'WAPO', 'WEHA', 'WEGE',
+      'WICO', 'WIFI', 'WIIM', 'WIKA', 'WINS', 'WIRG', 'WMPP', 'WMUU', 'WOMF',
+      'WOOD', 'WOWS', 'WSBP', 'WSKT', 'WTON', 'XADO', 'XBNI', 'XBSL', 'XCID',
+      'XIML', 'XIPI', 'XISC', 'XIIT', 'XLBF', 'XPDN', 'XPES', 'XPLN', 'XPRO',
+      'XPSG', 'XTAN', 'XVIP', 'YELO', 'YOII', 'YPAS', 'YULE', 'ZATA', 'ZBRA',
+      'ZINC', 'ZYRX'
+  ]
+  print(f'✅ [IHSG ENGINE] Memuat total {len(fallback_stocks)} emiten aktif secara langsung.')
+  return fallback_stocks
 
 
 # ==========================================
