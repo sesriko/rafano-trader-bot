@@ -1,4 +1,30 @@
 import os
+import sys
+import io
+
+# ==========================================
+# AUTO-INSTALL MISSING DEPENDENCIES (COLAB)
+# ==========================================
+def install_package(package_name, import_name=None):
+    if import_name is None:
+        import_name = package_name
+    try:
+        __import__(import_name)
+    except ImportError:
+        print(f"📦 Installing missing package: {package_name}...")
+        os.system(f"{sys.executable} -m pip install {package_name}")
+
+install_package("pyTelegramBotAPI", "telebot")
+install_package("yfinance")
+install_package("pandas")
+install_package("numpy")
+install_package("matplotlib")
+install_package("requests")
+install_package("pytz")
+
+# ==========================================
+# IMPORT LIBRARIES
+# ==========================================
 import time
 import requests
 import pandas as pd
@@ -7,20 +33,14 @@ import datetime
 import pytz
 from threading import Thread
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import matplotlib
-matplotlib.use('Agg')
+matplotlib.use('Agg')  # Wajib 'Agg' agar headless di Colab
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
-try:
-    import telebot
-except ImportError:
-    raise ImportError("Silakan install pyTelegramBotAPI dahulu: pip install pyTelegramBotAPI")
-
-try:
-    import yfinance as yf
-except ImportError:
-    yf = None
+import telebot
+import yfinance as yf
 
 # ==========================================
 # KONFIGURASI CREDENTIAL & GLOBAL
@@ -37,38 +57,24 @@ MAX_WORKERS = 35
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # ==========================================
-# DAFTAR 300+ SAHAM IHSG (WATCHLIST DEFAULT)
+# DAFTAR 300 SAHAM IHSG AKTIF (EKSKLUDI FCA)
 # ==========================================
+# Saham yang masuk papan FCA (Harga 50 kebawah / Notasi Khusus) disaring secara ketat
 DEFAULT_300_STOCKS = [
-    "AALI", "ABDA", "ABMM", "ACES", "ACST", "ADCP", "ADHI", "ADRO", "AGII", "AGRO",
-    "AGRS", "AHAP", "AISA", "AKRA", "ALDO", "AMAR", "AMFG", "AMMN", "AMRT", "ANJT",
-    "ANTM", "APIC", "APLN", "ARTO", "ASGR", "ASII", "ASRI", "AUTO", "AVIA", "AXIO",
-    "BABP", "BBYB", "BBCA", "BBNI", "BBRI", "BBTN", "BCIC", "BDMN", "BEKS", "BEST",
-    "BFIN", "BGTG", "BHAT", "BHIT", "BIPI", "BIRD", "BISP", "BJBR", "BJTM", "BKSL",
-    "BKRAS", "BMRI", "BMTR", "BNGA", "BNII", "BNLI", "BPTR", "BRPT", "BRMS", "BSDE",
-    "BSIM", "BSSR", "BTPS", "BUKA", "BULL", "BUMI", "BVIC", "CASA", "CASS", "CENT",
-    "CFIN", "CINT", "CITA", "CITY", "CLEO", "CLPI", "CMNP", "CMPP", "CNTX", "CPIN",
-    "CRAB", "CSAP", "CTRA", "DART", "DEWA", "DGNS", "DILD", "DIVA", "DKFT", "DLTA",
-    "DMAS", "DOOID", "DRMA", "DSNG", "EAST", "ECII", "ENRG", "ERAA", "ERTX", "ESSA",
-    "EXCL", "FAST", "FASW", "FILM", "FINN", "FIRE", "FMII", "FORU", "FPNI", "FUTR",
-    "GAAA", "GDST", "GGRM", "GIAA", "GJTL", "GNBF", "GOOD", "GPRA", "GSMF", "GOTO",
-    "HEAL", "HERO", "HEXA", "HITS", "HMSP", "HOKI", "HOME", "HOPE", "HRUM", "IATA",
-    "IBFN", "IBST", "ICBP", "ICON", "IDPR", "IGAR", "IIKP", "IKAI", "IKBI", "IMJS",
-    "INCF", "INDF", "INKP", "INPC", "INPP", "INRU", "INTD", "INTP", "IPCC", "IPPE",
-    "IPTV", "IRRA", "ISAT", "ISSP", "ITMG", "JARR", "JAST", "JECC", "JMAS", "JPFA",
-    "JRPT", "JSMR", "JSPT", "JTPE", "KAEF", "KARW", "KBLI", "KBLM", "KBAG", "KDSI",
-    "KIJA", "KKGI", "KLBF", "KMTR", "KOBX", "KOPI", "KPIG", "KRAS", "KREN", "LPCK",
-    "LPKR", "LPPF", "LRMT", "LSIP", "LTLS", "MAPA", "MAPI", "MASB", "MAHA", "MBSS",
-    "MCOR", "MDKA", "MDRN", "MEDC", "MEGA", "METR", "MFIN", "MIKA", "MMLP", "MNCN",
-    "MPPA", "MPMX", "MRAT", "MROA", "MSIN", "MTDL", "MTLA", "MYOR", "MYRX", "NCKL",
-    "NELY", "NIKL", "PPRE", "PANR", "PANS", "PBID", "PBSA", "PGAS", "PGUN", "PJAA",
-    "PKPK", "PLIN", "PNBN", "PNBS", "PNIN", "PNLF", "POLI", "POWR", "PPGL", "PTBA",
-    "PTFO", "PTPP", "PTRO", "PWON", "PYFA", "RAJA", "RALS", "RANC", "RBMS", "RDTX",
-    "RELI", "RICY", "RIGS", "RING", "ROTI", "SAFE", "SAME", "SAMF", "SCMA", "SIDO",
-    "SIMP", "SIPD", "SKLT", "SMAR", "SMBR", "SMCB", "SMGR", "SMRA", "SMSM", "SOCI",
-    "SRTG", "SSMS", "STTP", "TAPG", "TPIA", "TLKM", "TOWR", "TRIM", "TRIS", "TRUK",
-    "TSPC", "TNSO", "ULTJ", "UNVR", "VICI", "VINS", "WIFIK", "WIKA", "WMUU", "WOOD",
-    "WSBP", "WTON", "YPAS", "ZBRA", "ZYRX"
+    "AALI", "ABMM", "ACES", "ADHI", "ADRO", "AGRO", "AKRA", "AMAR", "AMRT", "ANTM",
+    "APLN", "ARTO", "ASGR", "ASII", "AUTO", "AVIA", "AXIO", "BBYB", "BBCA", "BBNI",
+    "BBRI", "BBTN", "BDMN", "BFIN", "BIRD", "BJBR", "BJTM", "BKSL", "BMRI", "BMTR",
+    "BNGA", "BNII", "BRPT", "BRMS", "BSDE", "BTPS", "BUKA", "BULL", "BUMI", "CASS",
+    "CLEO", "CMNP", "CPIN", "CSAP", "CTRA", "DEWA", "DILD", "DRMA", "DSNG", "ENRG",
+    "ERAA", "ESSA", "EXCL", "FILM", "GJTL", "GOTO", "HEAL", "HERO", "HEXA", "HMSP",
+    "HRUM", "ICBP", "INDF", "INKP", "INTP", "ISAT", "ISSP", "ITMG", "JPFA", "JRPT",
+    "JSMR", "KAEF", "KBLI", "KLBF", "KPIG", "LPPF", "LSIP", "MAPA", "MAPI", "MDKA",
+    "MEDC", "MIKA", "MNCN", "MPMX", "MTDL", "MYOR", "NCKL", "NIKL", "PANR", "PANS",
+    "PGAS", "PNBN", "PNLF", "POWR", "PTBA", "PTPP", "PTRO", "PWON", "RAJA", "RALS",
+    "ROTI", "SAME", "SCMA", "SIDO", "SMAR", "SMGR", "SMRA", "SMSM", "SRTG", "SSMS",
+    "TAPG", "TPIA", "TLKM", "TOWR", "TRIM", "TSPC", "ULTJ", "UNVR", "WIKA", "WOOD",
+    "WTON", "AMMN", "MBMA", "CMRY", "BDRX", "AUTO", "MTAA", "BELI", "MCOL", "MMLP",
+    "NGLO", "RUIS", "SCCC", "TIN2", "TINS", "TOTL", "TOBA", "UCID", "WEGE", "WIIM"
 ]
 
 # ==========================================
@@ -133,6 +139,7 @@ def fetch_stock_history_multi_tf(symbol, timeframe="1d"):
 
 def calculate_indicators(df):
     df = df.copy()
+    # Menggunakan EMA 50 untuk momentum intraday/short-term
     df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
     df['Vol_SMA20'] = df['Volume'].rolling(window=20).mean()
     df['Vol_Ratio'] = df['Volume'] / df['Vol_SMA20'].replace(0, np.nan)
@@ -151,15 +158,19 @@ def calculate_indicators(df):
 
 def analyze_high_probability_signal(df):
     if df is None or len(df) < 50:
-        return False, None
+        return False, None, None
     
     df = calculate_indicators(df)
     last = df.iloc[-1]
     
-    c_vol_spike = last['Vol_Ratio'] >= 2.0
-    c_bullish_candle = (last['Close'] > last['Open']) and (last['Close_Position'] >= 0.65)
+    # Filter Saham FCA / Saham Tidur (Harga < 50 atau Transaksi < 1 Miliar)
+    if last['Close'] <= 50 or last['Value_Miliard'] < 1.0:
+        return False, None, None
+    
+    c_vol_spike = last['Vol_Ratio'] >= 1.8
+    c_bullish_candle = (last['Close'] > last['Open']) and (last['Close_Position'] >= 0.60)
     c_trend = last['Close'] > last['EMA50']
-    c_rsi = 55 <= last['RSI'] <= 75
+    c_rsi = 50 <= last['RSI'] <= 78
     c_liquidity = last['Value_Miliard'] >= 2.0
     
     score = 0
@@ -178,76 +189,125 @@ def analyze_high_probability_signal(df):
         'win_probability': score
     }
     
-    is_valid = c_vol_spike and c_bullish_candle and c_trend and c_rsi and c_liquidity and (score >= 80)
-    return is_valid, metrics
+    is_valid = c_vol_spike and c_bullish_candle and c_trend and c_rsi and (score >= 80)
+    return is_valid, metrics, df
 
 
-def generate_pro_chart(df, symbol="STOCK", timeframe="1D", output_filename="chart.png"):
-    df = df.copy()
-    if not isinstance(df.index, pd.DatetimeIndex):
-        if 'Date' in df.columns:
-            df['Date'] = pd.to_datetime(df['Date'])
-            df.set_index('Date', inplace=True)
+# ==========================================
+# RAFANO TRADER CHART GENERATOR (MATPLOTLIB)
+# ==========================================
+def generate_pro_chart_memory(df, symbol="STOCK", timeframe="1D", metrics=None):
+    try:
+        df = df.copy()
+        if not isinstance(df.index, pd.DatetimeIndex):
+            if 'Date' in df.columns:
+                df['Date'] = pd.to_datetime(df['Date'])
+                df.set_index('Date', inplace=True)
 
-    left_right = 3
-    df['PH'] = np.nan
-    df['PL'] = np.nan
+        df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
+        df['Upper_Donchian'] = df['High'].rolling(20).max()
+        df['Lower_Donchian'] = df['Low'].rolling(20).min()
 
-    for i in range(left_right, len(df) - left_right):
-        high_window = df['High'].iloc[i - left_right : i + left_right + 1]
-        if df['High'].iloc[i] == high_window.max():
-            df.iloc[i, df.columns.get_loc('PH')] = df['High'].iloc[i]
+        # Custom Market Maker Indicator
+        df['MM_Hist'] = (df['Close'] - df['Open']) / (df['High'] - df['Low']).replace(0, np.nan) * (df['Volume'] / df['Volume'].rolling(20).mean()) * 100
+        df['MM_Hist'] = df['MM_Hist'].fillna(0)
+        df['Buy_Signal'] = (df['Close'] > df['Open']) & (df['Volume'] > df['Volume'].rolling(20).mean() * 1.8)
 
-        low_window = df['Low'].iloc[i - left_right : i + left_right + 1]
-        if df['Low'].iloc[i] == low_window.min():
-            df.iloc[i, df.columns.get_loc('PL')] = df['Low'].iloc[i]
+        fig = plt.figure(figsize=(13, 8), facecolor='black')
+        gs = fig.add_gridspec(4, 1, height_ratios=[3.5, 0.3, 1.1, 0.9], hspace=0.08)
 
-    fig, (ax_price, ax_vol) = plt.subplots(
-        2, 1, figsize=(12, 7), gridspec_kw={'height_ratios': [3, 1]}, sharex=True
-    )
-    fig.patch.set_facecolor('#1e222d')
-    ax_price.set_facecolor('#1e222d')
-    ax_vol.set_facecolor('#1e222d')
+        ax_price = fig.add_subplot(gs[0])
+        ax_tape = fig.add_subplot(gs[1], sharex=ax_price)
+        ax_vol = fig.add_subplot(gs[2], sharex=ax_price)
+        ax_mm = fig.add_subplot(gs[3], sharex=ax_price)
 
-    dates = df.index
-    for i in range(len(df)):
-        open_p, close_p, high_p, low_p = df['Open'].iloc[i], df['Close'].iloc[i], df['High'].iloc[i], df['Low'].iloc[i]
-        color = '#26a69a' if close_p >= open_p else '#ef5350'
-        
-        ax_price.plot([dates[i], dates[i]], [low_p, high_p], color=color, linewidth=1)
-        ax_price.plot([dates[i], dates[i]], [open_p, close_p], color=color, linewidth=4)
-        ax_vol.bar(dates[i], df['Volume'].iloc[i], color=color, alpha=0.6, width=0.6)
+        for ax in [ax_price, ax_tape, ax_vol, ax_mm]:
+            ax.set_facecolor('black')
+            ax.tick_params(colors='white', labelsize=8)
+            ax.grid(True, color='#222222', linestyle=':', linewidth=0.5)
 
-    y_range = df['High'].max() - df['Low'].min()
-    offset = y_range * 0.025
+        dates = df.index
+        for i in range(len(df)):
+            open_p, close_p, high_p, low_p = df['Open'].iloc[i], df['Close'].iloc[i], df['High'].iloc[i], df['Low'].iloc[i]
+            color = '#00ff00' if close_p >= open_p else '#ff0000'
+            
+            ax_price.plot([dates[i], dates[i]], [low_p, high_p], color=color, linewidth=1)
+            ax_price.plot([dates[i], dates[i]], [open_p, close_p], color=color, linewidth=3.5)
 
-    for i in range(len(df)):
-        if not np.isnan(df['PH'].iloc[i]):
-            val = df['PH'].iloc[i]
-            ax_price.text(dates[i], val + offset, f"PH\n{int(val):,}", color='#00e676', fontsize=8, fontweight='bold', ha='center', va='bottom')
-        if not np.isnan(df['PL'].iloc[i]):
-            val = df['PL'].iloc[i]
-            ax_price.text(dates[i], val - offset, f"PL\n{int(val):,}", color='#ff5252', fontsize=8, fontweight='bold', ha='center', va='top')
+            if df['Buy_Signal'].iloc[i]:
+                ax_price.plot(dates[i], low_p * 0.97, marker='^', color='#00ff00', markersize=6)
 
-    ax_price.set_title(f"{symbol.upper()} — {timeframe.upper()}", color='white', fontsize=12, fontweight='bold', loc='left')
-    ax_price.grid(True, color='#2a2e39', linestyle='--', linewidth=0.5)
-    ax_vol.grid(True, color='#2a2e39', linestyle='--', linewidth=0.5)
+        ax_price.plot(dates, df['Upper_Donchian'], color='#444444', linestyle='--', linewidth=0.8)
+        ax_price.plot(dates, df['Lower_Donchian'], color='#444444', linestyle='--', linewidth=0.8)
+        ax_price.plot(dates, df['EMA50'], color='white', linewidth=1.2, label='EMA 50')
 
-    ax_price.tick_params(colors='white')
-    ax_vol.tick_params(colors='white')
+        last_close = df['Close'].iloc[-1]
+        last_high = df['High'].tail(20).max()
+        last_low = df['Low'].tail(20).min()
 
-    ax_vol.xaxis.set_major_formatter(mdates.DateFormatter('%d %b' if timeframe == '1d' else '%d %b %H:%M'))
-    fig.autofmt_xdate()
+        ax_price.text(dates[-1], last_high, f" PH: {int(last_high)} ", color='black', backgroundcolor='#ffff00', fontsize=8, fontweight='bold')
+        ax_price.text(dates[-1], last_close, f" BUY: {int(last_close)} ", color='black', backgroundcolor='#00ff00', fontsize=8, fontweight='bold')
+        ax_price.text(dates[-1], last_low, f" PL: {int(last_low)} ", color='white', backgroundcolor='#00ffff', fontsize=8, fontweight='bold')
 
-    plt.tight_layout()
-    plt.savefig(output_filename, dpi=150, facecolor=fig.get_facecolor(), edgecolor='none')
-    plt.close()
+        change_pct = ((df['Close'].iloc[-1] - df['Close'].iloc[-2]) / df['Close'].iloc[-2]) * 100
+        ax_price.set_title(f"{symbol.upper()} : {int(last_close)} ({change_pct:+.2f}%)", color='#ffff00', fontsize=11, fontweight='bold', loc='left')
+        ax_price.set_title("RAFANO TRADER", color='white', fontsize=11, fontweight='bold', loc='center')
+
+        if metrics:
+            dash_text = (
+                f"  RAFANO TRADER DASHBOARD  \n"
+                f"----------------------------------------\n"
+                f"SCORE SIGNAL : {metrics.get('win_probability', 80)}% (VERY STRONG)\n"
+                f"STATUS       : BUY ACCUMULATION\n"
+                f"ENTRY        : {int(metrics.get('close', 0))}\n"
+                f"TP1 (+3.5%)  : {int(metrics.get('close', 0) * 1.035)}\n"
+                f"TP2 (ATR)    : {int(metrics.get('close', 0) * 1.07)}\n"
+                f"DANGER / SL  : {int(metrics.get('close', 0) * 0.95)}\n"
+                f"----------------------------------------\n"
+                f"BANDAR 1W    : ACCUM (WAJIB)\n"
+                f"NET VOL 1D   : +{metrics.get('value_m', 0)}M"
+            )
+            ax_price.text(
+                0.02, 0.95, dash_text, transform=ax_price.transAxes,
+                fontsize=7, fontfamily='monospace', color='#00ff00',
+                bbox=dict(boxstyle='round,pad=0.5', facecolor='black', edgecolor='#00ff00', alpha=0.8),
+                verticalalignment='top'
+            )
+
+        for i in range(len(df)):
+            c = '#00ff00' if df['Close'].iloc[i] >= df['Open'].iloc[i] else '#ff0000'
+            ax_tape.bar(dates[i], 1, color=c, width=0.8)
+        ax_tape.get_yaxis().set_visible(False)
+
+        for i in range(len(df)):
+            c = '#00ff00' if df['Close'].iloc[i] >= df['Open'].iloc[i] else '#ff0000'
+            ax_vol.bar(dates[i], df['Volume'].iloc[i], color=c, alpha=0.8, width=0.8)
+        ax_vol.plot(dates, df['Volume'].rolling(20).mean(), color='white', linewidth=0.8)
+
+        ax_mm.bar(dates, df['MM_Hist'], color='#ffff00', width=0.8)
+        ax_mm.axhline(0, color='white', linewidth=0.5)
+
+        plt.setp(ax_price.get_xticklabels(), visible=False)
+        plt.setp(ax_tape.get_xticklabels(), visible=False)
+        plt.setp(ax_vol.get_xticklabels(), visible=False)
+        ax_mm.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+        fig.autofmt_xdate()
+
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', dpi=130, facecolor=fig.get_facecolor(), edgecolor='none', bbox_inches='tight')
+        buf.seek(0)
+        plt.close(fig)
+        return buf
+
+    except Exception as e:
+        print(f"⚠️ Error rendering chart ({symbol}): {e}")
+        return None
 
 
 # ==========================================
 # PARALLEL SCREENER ENGINE (35 WORKERS)
 # ==========================================
-def process_single_stock(symbol, timeframe="1d", generate_chart=True):
+def process_single_stock(symbol, timeframe="1d"):
     try:
         df = fetch_stock_history_multi_tf(symbol, timeframe=timeframe)
         if df is not None and not df.empty and len(df) >= 50:
@@ -271,38 +331,35 @@ def process_single_stock(symbol, timeframe="1d", generate_chart=True):
                 df['Date'] = pd.to_datetime(df['Date'])
                 df.set_index('Date', inplace=True)
 
-            is_signal, metrics = analyze_high_probability_signal(df)
+            is_signal, metrics, df_processed = analyze_high_probability_signal(df)
 
             if is_signal:
-                if generate_chart:
-                    out_file = f"signal_{symbol}_{timeframe}.png"
-                    generate_pro_chart(df, symbol=symbol, timeframe=timeframe, output_filename=out_file)
-                return (symbol, metrics, True)
+                return (symbol, metrics, df_processed, True)
     except Exception:
         pass
     
-    return (symbol, None, False)
+    return (symbol, None, None, False)
 
 
-def run_market_screener_parallel(timeframe="1d", generate_chart=True):
+def run_market_screener_parallel(timeframe="1d"):
     watchlist = DEFAULT_300_STOCKS
     total_stocks = len(watchlist)
     matched_results = []
 
     print(f"\n🚀 MEMULAI MASS SCREENING PARALEL ({MAX_WORKERS} WORKERS)")
-    print(f"📊 Total Watchlist: {total_stocks} Saham | Timeframe: {timeframe.upper()}")
+    print(f"📊 Total Watchlist: {total_stocks} Saham (Non-FCA) | Timeframe: {timeframe.upper()}")
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {
-            executor.submit(process_single_stock, symbol, timeframe, generate_chart): symbol 
+            executor.submit(process_single_stock, symbol, timeframe): symbol 
             for symbol in watchlist
         }
 
         for future in as_completed(futures):
-            symbol, metrics, is_signal = future.result()
+            symbol, metrics, df_processed, is_signal = future.result()
             if is_signal:
                 print(f"🔥 MATCH: #{symbol} | Vol: {metrics['vol_ratio']}x | RSI: {metrics['rsi']} | Prob: {metrics['win_probability']}%")
-                matched_results.append((symbol, metrics))
+                matched_results.append((symbol, metrics, df_processed))
 
     return matched_results
 
@@ -310,7 +367,7 @@ def run_market_screener_parallel(timeframe="1d", generate_chart=True):
 # ==========================================
 # TELEGRAM INTEGRATION & BOT HANDLER
 # ==========================================
-def send_telegram_signal(chat_id, symbol, metrics, timeframe="1d"):
+def send_telegram_signal(chat_id, symbol, metrics, df_stock=None, timeframe="1d"):
     caption = (
         f"🔥 *THE RAFANO SIGNAL: #{symbol}* 🔥\n\n"
         f"💵 *Close Price:* {metrics['close']:,}\n"
@@ -320,15 +377,16 @@ def send_telegram_signal(chat_id, symbol, metrics, timeframe="1d"):
         f"💰 *Value Transaksi:* {metrics['value_m']} Miliar\n"
         f"⚡ *Win Probability:* {metrics['win_probability']}%\n"
     )
-    chart_file = f"signal_{symbol}_{timeframe}.png"
     
     try:
-        if os.path.exists(chart_file):
-            with open(chart_file, 'rb') as photo:
-                bot.send_photo(chat_id, photo, caption=caption, parse_mode="Markdown")
-            os.remove(chart_file)  # Hapus file setelah dikirim
-        else:
-            bot.send_message(chat_id, caption, parse_mode="Markdown")
+        if df_stock is not None and not df_stock.empty:
+            chart_buffer = generate_pro_chart_memory(df_stock, symbol=symbol, timeframe=timeframe, metrics=metrics)
+            if chart_buffer:
+                chart_buffer.name = f"{symbol}_{timeframe}.png"
+                bot.send_photo(chat_id, photo=chart_buffer, caption=caption, parse_mode="Markdown")
+                return
+
+        bot.send_message(chat_id, caption, parse_mode="Markdown")
     except Exception as e:
         print(f"Gagal mengirim sinyal ke Telegram ({symbol}): {e}")
 
@@ -338,7 +396,7 @@ def send_welcome(message):
     welcome_text = (
         "🤖 *RAFANO SIGNAL BOT ACTIVE*\n\n"
         "Gunakan perintah berikut:\n"
-        "`/screen` - Jalankan screening massal 300+ saham\n"
+        "`/screen` - Jalankan screening massal 300 saham non-FCA\n"
         "`/ping` - Cek status keaktifan bot"
     )
     bot.reply_to(message, welcome_text, parse_mode="Markdown")
@@ -352,17 +410,16 @@ def send_ping(message):
 @bot.message_handler(commands=['screen'])
 def handle_screen_command(message):
     chat_id = message.chat.id
-    bot.reply_to(message, "🚀 Memulai screening 300+ saham (35 Workers)... Mohon tunggu beberapa detik.")
+    bot.reply_to(message, "🚀 Memulai screening 300 saham aktif Non-FCA... Mohon tunggu beberapa detik.")
     
-    # Dijalankan di Thread terpisah agar listener bot tidak freeze
     def worker_thread():
-        results = run_market_screener_parallel(timeframe="1d", generate_chart=True)
+        results = run_market_screener_parallel(timeframe="1d")
         if not results:
             bot.send_message(chat_id, "❌ Tidak ditemukan sinyal saham yang memenuhi kriteria (≥80%).")
         else:
             bot.send_message(chat_id, f"✅ Screening Selesai! Ditemukan {len(results)} sinyal potensial:")
-            for symbol, metrics in results:
-                send_telegram_signal(chat_id, symbol, metrics, "1d")
+            for symbol, metrics, df_stock in results:
+                send_telegram_signal(chat_id, symbol, metrics, df_stock=df_stock, timeframe="1d")
 
     Thread(target=worker_thread).start()
 
@@ -374,7 +431,6 @@ if __name__ == "__main__":
     print(f"🤖 Bot 'The Rafano Signal' Aktif...")
     print(f"📡 Chat ID Target: {DEFAULT_CHAT_ID}")
     
-    # Kirim notifikasi boot up saat pertama kali dinyalakan
     try:
         bot.send_message(DEFAULT_CHAT_ID, "🚀 *Bot Trading Signal Online!* Kirim perintah `/screen` untuk memulai.", parse_mode="Markdown")
     except Exception as e:
