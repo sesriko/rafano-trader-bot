@@ -174,15 +174,15 @@ def calculate_buy_signal_strength(df):
     last_vol = last_row['Volume']
     avg_vol_v1 = last_row['V1']
 
-    df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
-    ema_50 = df['EMA50'].iloc[-1]
+    df['EMA200'] = df['Close'].ewm(span=200, adjust=False).mean()
+    ema_200 = df['EMA200'].iloc[-1]
 
     df, buy_ratios = calculate_vsa_metrics(df)
     last_buy_ratio = buy_ratios[-1]
     net_5d_vol = df['Net_Vol_VSA'].tail(5).sum()
 
     score = 0
-    if last_close > ema_50: score += 25
+    if last_close > ema_200: score += 25
 
     vol_multiple = last_vol / avg_vol_v1 if avg_vol_v1 > 0 else 0
     if vol_multiple >= 2.0: score += 25
@@ -217,13 +217,13 @@ def check_volume_spike_signal(df, symbol, threshold_multiplier=1.2, min_value_tr
     df, buy_ratios = calculate_vsa_metrics(df)
     avg_vol_v1, last_open, last_buy_ratio = last_row['V1'], last_row['Open'], buy_ratios[-1]
     
-    df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
-    ema_50 = df['EMA50'].iloc[-1]
+    df['EMA200'] = df['Close'].ewm(span=200, adjust=False).mean()
+    ema_200 = df['EMA200'].iloc[-1]
 
     net_5d_vol = df['Net_Vol_VSA'].tail(5).sum()
     is_bandar_accum = net_5d_vol > 0
 
-    if (last_close > ema_50) and (last_vol >= (avg_vol_v1 * threshold_multiplier)) and (last_close > last_open) and (last_buy_ratio >= 0.55) and is_bandar_accum:
+    if (last_close > ema_200) and (last_vol >= (avg_vol_v1 * threshold_multiplier)) and (last_close > last_open) and (last_buy_ratio >= 0.55) and is_bandar_accum:
         vol_multiple = last_vol / avg_vol_v1 if avg_vol_v1 > 0 else 0
         change_pct = ((last_close / df['Close'].iloc[-2]) - 1) * 100 if len(df) > 1 else 0.0
         score, score_label = calculate_buy_signal_strength(df)
@@ -250,8 +250,8 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
 
         last_close, last_open, last_high, last_low, last_vol = df['Close'].iloc[-1], df['Open'].iloc[-1], df['High'].iloc[-1], df['Low'].iloc[-1], df['Volume'].iloc[-1]
 
-        df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
-        df['Trend_Curve'] = df['EMA50']
+        df['EMA200'] = df['Close'].ewm(span=200, adjust=False).mean()
+        df['Trend_Curve'] = df['EMA200']
         df['ATR'] = calculate_atr(df, period=14)
 
         df['Pivot_High'] = df['High'].rolling(window=12, min_periods=1).max()
@@ -265,7 +265,7 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
         signal_score, score_lbl = calculate_buy_signal_strength(df)
 
         if 'MM' not in df.columns:
-            df['MM'] = (df['Close'] - df['EMA50']) / df['EMA50'] * 1000 + np.sin(np.linspace(0, 10, len(df))) * 15 - 10.9258
+            df['MM'] = (df['Close'] - df['EMA200']) / df['EMA200'] * 1000 + np.sin(np.linspace(0, 10, len(df))) * 15 - 10.9258
 
         plt.style.use('dark_background')
         fig = plt.figure(figsize=(18, 10), facecolor='#000000')
@@ -312,14 +312,14 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
         for i in range(5, len(df)):
             c_price, o_price = df['Close'].iloc[i], df['Open'].iloc[i]
             vol_curr, vol_avg = df['Volume'].iloc[i], df['V1'].iloc[i]
-            ema_50 = df['EMA50'].iloc[i]
+            ema_200 = df['EMA200'].iloc[i]
             b_ratio = buy_ratios[i]
             atr_val = df['ATR'].iloc[i]
             
             net_5d_i = df['Net_Vol_VSA'].iloc[max(0, i-4):i+1].sum()
             is_bandar_accum_i = net_5d_i > 0
 
-            is_accum_trend = (c_price > 50) and (c_price > ema_50) and (c_price > o_price) and (vol_curr >= vol_avg * 1.0) and (b_ratio >= 0.55) and is_bandar_accum_i
+            is_accum_trend = (c_price > 50) and (c_price > ema_200) and (c_price > o_price) and (vol_curr >= vol_avg * 1.0) and (b_ratio >= 0.55) and is_bandar_accum_i
 
             if is_accum_trend and (i - last_signal_idx >= 4):
                 buy_price = round_to_ihsg_fraction(c_price)
@@ -336,6 +336,7 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
                 latest_setup = {"status": "BUY ACCUMULATION", "entry": buy_price, "tp1": tp1_price, "tp2": tp2_price, "danger": danger_price}
                 last_signal_idx = i
 
+        # Dashboard dipindah ke sebelah kiri (x=0.015)
         status_color = "#00ff00" if latest_setup["status"] == "BUY ACCUMULATION" else "#ffff00"
         dashboard_text = (
             f"   📊 RAFANO TRADER DASHBOARD   \n"
@@ -351,20 +352,17 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
             f" NET VOL 1D : {format_large_number(net_vol_today, show_sign=True)}"
         )
         
-        ax_main.text(0.985, 0.95, dashboard_text, transform=ax_main.transAxes, verticalalignment='top', horizontalalignment='right',
+        ax_main.text(0.015, 0.95, dashboard_text, transform=ax_main.transAxes, verticalalignment='top', horizontalalignment='left',
                      fontfamily='monospace', fontsize=9, color=status_color,
                      bbox=dict(boxstyle='round,pad=0.5', facecolor='#000000', alpha=0.88, edgecolor='#444444'))
 
-        stat_text_left = (f"Avg Price : {df['Close'].tail(5).mean():.1f}\nVSA Buy   : {safe_int(buy_ratios[-1]*100)}%")
-        ax_main.text(0.015, 0.95, stat_text_left, transform=ax_main.transAxes, verticalalignment='top',
-                     fontfamily='monospace', fontsize=9, color='#00ffff',
-                     bbox=dict(boxstyle='square,pad=0.3', facecolor='#000000', alpha=0.8, edgecolor='#222222'))
-
+        # Label harga/pivot dipindahkan ke luar axis (di sebelah kanan area plot, misal di indeks len(df) + 1)
         latest_ph, latest_pl = df['Pivot_High'].iloc[-1], df['Pivot_Low'].iloc[-1]
-        ax_main.text(len(df) + 0.5, latest_ph, f" {safe_int(latest_ph)} ", color='black', backgroundcolor='#ffff00', fontsize=9, fontweight='bold')
-        ax_main.text(len(df) + 0.5, latest_pl, f" {safe_int(latest_pl)} ", color='black', backgroundcolor='#00ffff', fontsize=9, fontweight='bold')
+        ax_main.text(len(df) + 1.0, latest_ph, f" PH: {safe_int(latest_ph)} ", color='black', backgroundcolor='#ffff00', fontsize=8.5, fontweight='bold', va='center', ha='left')
+        ax_main.text(len(df) + 1.0, latest_pl, f" PL: {safe_int(latest_pl)} ", color='black', backgroundcolor='#00ffff', fontsize=8.5, fontweight='bold', va='center', ha='left')
 
-        ax_main.set_xlim(-4, len(df) + 4)
+        # Perlebar batas kanan axis agar label luar tidak terpotong
+        ax_main.set_xlim(-4, len(df) + 6)
         ax_main.set_ylim(df['Low'].min() * 0.90, df['High'].max() * 1.10)
 
         change_pct = ((last_close / df['Close'].iloc[-2]) - 1) * 100 if len(df) > 1 else 0.0
@@ -401,7 +399,9 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
         mm_colors = ['#ffff00' if v >= 0 else '#555555' for v in df['MM']]
         ax_mm.bar(x_indices, df['MM'], color=mm_colors, width=0.4)
         ax_mm.text(0.01, 0.85, "Market Maker", transform=ax_mm.transAxes, color='#ffff00', fontsize=8.5, fontweight='bold')
-        ax_mm.text(len(df) + 0.5, df['MM'].iloc[-1], f"{df['MM'].iloc[-1]:.4f}", color='black', backgroundcolor='#ffff00', fontsize=8.5, fontweight='bold')
+        
+        # Label Market Maker dipindah ke luar axis di sisi kanan
+        ax_mm.text(len(df) + 1.0, df['MM'].iloc[-1], f"{df['MM'].iloc[-1]:.4f}", color='black', backgroundcolor='#ffff00', fontsize=8.5, fontweight='bold', va='center', ha='left')
 
         step = max(1, len(df) // 8)
         ax_mm.set_xticks(x_indices[::step])
