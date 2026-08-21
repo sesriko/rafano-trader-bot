@@ -1,9 +1,11 @@
 import os
+import time
 import requests
 import pandas as pd
 import numpy as np
 import datetime
 import pytz
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -16,6 +18,7 @@ ARJUM_API_BASE_URL = "https://stock.arjum.com/api"
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
 }
+MAX_WORKERS = 35  # Set ke 35 Worker paralel
 
 try:
     import yfinance as yf
@@ -26,6 +29,42 @@ except ImportError:
 def get_now_wib():
     wib = pytz.timezone('Asia/Jakarta')
     return datetime.datetime.now(wib)
+
+
+# ==========================================
+# DAFTAR 300+ SAHAM IHSG (WATCHLIST DEFAULT)
+# ==========================================
+DEFAULT_300_STOCKS = [
+    "AALI", "ABDA", "ABMM", "ACES", "ACST", "ADCP", "ADHI", "ADRO", "AGII", "AGRO",
+    "AGRS", "AHAP", "AISA", "AKRA", "ALDO", "AMAR", "AMFG", "AMMN", "AMRT", "ANJT",
+    "ANTM", "APIC", "APLN", "ARTO", "ASGR", "ASII", "ASRI", "AUTO", "AVIA", "AXIO",
+    "BABP", "BBYB", "BBCA", "BBNI", "BBRI", "BBTN", "BCIC", "BDMN", "BEKS", "BEST",
+    "BFIN", "BGTG", "BHAT", "BHIT", "BIPI", "BIRD", "BISP", "BJBR", "BJTM", "BKSL",
+    "BKRAS", "BMRI", "BMTR", "BNGA", "BNII", "BNLI", "BPTR", "BRPT", "BRMS", "BSDE",
+    "BSIM", "BSSR", "BTPS", "BUKA", "BULL", "BUMI", "BVIC", "CASA", "CASS", "CENT",
+    "CFIN", "CINT", "CITA", "CITY", "CLEO", "CLPI", "CMNP", "CMPP", "CNTX", "CPIN",
+    "CRAB", "CSAP", "CTRA", "DART", "DEWA", "DGNS", "DILD", "DIVA", "DKFT", "DLTA",
+    "DMAS", "DOOID", "DRMA", "DSNG", "EAST", "ECII", "ENRG", "ERAA", "ERTX", "ESSA",
+    "EXCL", "FAST", "FASW", "FILM", "FINN", "FIRE", "FMII", "FORU", "FPNI", "FUTR",
+    "GAAA", "GDST", "GGRM", "GIAA", "GJTL", "GNBF", "GOOD", "GPRA", "GSMF", "GOTO",
+    "HEAL", "HERO", "HEXA", "HITS", "HMSP", "HOKI", "HOME", "HOPE", "HRUM", "IATA",
+    "IBFN", "IBST", "ICBP", "ICON", "IDPR", "IGAR", "IIKP", "IKAI", "IKBI", "IMJS",
+    "INCF", "INDF", "INKP", "INPC", "INPP", "INRU", "INTD", "INTP", "IPCC", "IPPE",
+    "IPTV", "IRRA", "ISAT", "ISSP", "ITMG", "JARR", "JAST", "JECC", "JMAS", "JPFA",
+    "JRPT", "JSMR", "JSPT", "JTPE", "KAEF", "KARW", "KBLI", "KBLM", "KBAG", "KDSI",
+    "KIJA", "KKGI", "KLBF", "KMTR", "KOBX", "KOPI", "KPIG", "KRAS", "KREN", "LPCK",
+    "LPKR", "LPPF", "LRMT", "LSIP", "LTLS", "MAPA", "MAPI", "MASB", "MAHA", "MBSS",
+    "MCOR", "MDKA", "MDRN", "MEDC", "MEGA", "METR", "MFIN", "MIKA", "MMLP", "MNCN",
+    "MPPA", "MPMX", "MRAT", "MROA", "MSIN", "MTDL", "MTLA", "MYOR", "MYRX", "NCKL",
+    "NELY", "NIKL", "PPRE", "PANR", "PANS", "PBID", "PBSA", "PGAS", "PGUN", "PJAA",
+    "PKPK", "PLIN", "PNBN", "PNBS", "PNIN", "PNLF", "POLI", "POWR", "PPGL", "PTBA",
+    "PTFO", "PTPP", "PTRO", "PWON", "PYFA", "RAJA", "RALS", "RANC", "RBMS", "RDTX",
+    "RELI", "RICY", "RIGS", "RING", "ROTI", "SAFE", "SAME", "SAMF", "SCMA", "SIDO",
+    "SIMP", "SIPD", "SKLT", "SMAR", "SMBR", "SMCB", "SMGR", "SMRA", "SMSM", "SOCI",
+    "SRTG", "SSMS", "STTP", "TAPG", "TPIA", "TLKM", "TOWR", "TRIM", "TRIS", "TRUK",
+    "TSPC", "TNSO", "ULTJ", "UNVR", "VICI", "VINS", "WIFIK", "WIKA", "WMUU", "WOOD",
+    "WSBP", "WTON", "YPAS", "ZBRA", "ZYRX"
+]
 
 
 # ==========================================
@@ -44,7 +83,6 @@ def fetch_stock_history_multi_tf(symbol, timeframe="1d"):
     yf_setting = yf_tf_map.get(timeframe)
     interval, period = yf_setting if yf_setting else ('1d', '1y')
 
-    # API Arjum hanya dipanggil jika timeframe daily (1d)
     if interval == '1d':
         endpoints = [
             f"{ARJUM_API_BASE_URL}/history/{symbol}?interval=1d&limit=150",
@@ -63,7 +101,6 @@ def fetch_stock_history_multi_tf(symbol, timeframe="1d"):
             except Exception:
                 pass
 
-    # Fallback / Intraday menggunakan yfinance
     if yf is not None:
         try:
             yf_symbol = symbol if (symbol.endswith(".JK") or not symbol.isalpha()) else f"{symbol}.JK"
@@ -71,19 +108,16 @@ def fetch_stock_history_multi_tf(symbol, timeframe="1d"):
             df_yf = ticker_obj.history(interval=interval, period=period, auto_adjust=False, actions=False)
             
             if df_yf is not None and not df_yf.empty:
-                # Meratakan MultiIndex jika ada
                 if isinstance(df_yf.columns, pd.MultiIndex):
                     df_yf.columns = [col[0] for col in df_yf.columns]
                 
                 df_yf.reset_index(inplace=True)
                 df_yf.columns = [str(c).capitalize() for c in df_yf.columns]
 
-                # Normalisasi Waktu & Hapus Timezone
                 date_col = 'Date' if 'Date' in df_yf.columns else ('Datetime' if 'Datetime' in df_yf.columns else None)
                 if date_col:
                     df_yf['Date'] = pd.to_datetime(df_yf[date_col]).dt.tz_localize(None)
 
-                # Convert numeric
                 for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
                     if col in df_yf.columns:
                         df_yf[col] = pd.to_numeric(df_yf[col], errors='coerce')
@@ -91,37 +125,35 @@ def fetch_stock_history_multi_tf(symbol, timeframe="1d"):
                 df_clean = df_yf.dropna(subset=['Close']).copy()
                 df_clean['Symbol_Owner'] = symbol
                 return df_clean
-        except Exception as e:
-            print(f"Error fetching YF ({symbol} - {timeframe}): {e}")
+        except Exception:
             pass
     return None
 
 
 # ==========================================
-# 2. ANALYSIS & HIGH PROBABILITY SIGNAL ENGINE
+# 2. INDIKATOR & LOGIKA FILTER SINYAL KETAT
 # ==========================================
 def calculate_indicators(df):
-    """Menghitung indikator teknikal utama: EMA 50, Volume SMA 20, dan RSI 14"""
     df = df.copy()
     
-    # 1. EMA 50 (Major Trend)
+    # EMA 50 (Major Trend)
     df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
     
-    # 2. Volume SMA 20 & Volume Ratio
+    # Volume SMA 20 & Ratio
     df['Vol_SMA20'] = df['Volume'].rolling(window=20).mean()
     df['Vol_Ratio'] = df['Volume'] / df['Vol_SMA20'].replace(0, np.nan)
     
-    # 3. Nilai Transaksi (Dalam Miliar Rp)
+    # Value Transaksi (Miliar Rp)
     df['Value_Miliard'] = (df['Close'] * df['Volume']) / 1_000_000_000
     
-    # 4. RSI 14
+    # RSI 14
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     rs = gain / loss.replace(0, np.nan)
     df['RSI'] = 100 - (100 / (1 + rs))
     
-    # 5. Position in Range Candle (Close vs High-Low)
+    # Candle Body Position
     high_low_range = (df['High'] - df['Low']).replace(0, np.nan)
     df['Close_Position'] = (df['Close'] - df['Low']) / high_low_range
     
@@ -129,30 +161,20 @@ def calculate_indicators(df):
 
 
 def analyze_high_probability_signal(df):
-    """
-    Kriteria Filter Ketat Probabilitas Kenaikan >= 80%:
-    - Vol Spike >= 2.0x (200% dari Rata-rata SMA 20)
-    - Bullish Candle Kuat (Close > Open & Close di 35% teratas range)
-    - Above EMA 50 (Major Trend Up)
-    - RSI Momentum (55 - 75)
-    - Likuiditas Transaksi >= 2 Miliar
-    """
     if df is None or len(df) < 50:
         return False, None
     
     df = calculate_indicators(df)
     last = df.iloc[-1]
     
-    # --- CHECK KONDISI ---
     c_vol_spike = last['Vol_Ratio'] >= 2.0
     c_bullish_candle = (last['Close'] > last['Open']) and (last['Close_Position'] >= 0.65)
     c_trend = last['Close'] > last['EMA50']
     c_rsi = 55 <= last['RSI'] <= 75
     c_liquidity = last['Value_Miliard'] >= 2.0
     
-    # Skor Probabilitas Berbasis Bobot Kriteria
     score = 0
-    if c_vol_spike: score += 35      # Bobot utama di lonjakan volume
+    if c_vol_spike: score += 35
     if c_bullish_candle: score += 20
     if c_trend: score += 15
     if c_rsi: score += 15
@@ -172,7 +194,7 @@ def analyze_high_probability_signal(df):
 
 
 # ==========================================
-# 3. GENERATE CHART & TRANSPARENT PH/PL
+# 3. GENERATE CHART PRO
 # ==========================================
 def generate_pro_chart(df, symbol="STOCK", timeframe="1D", output_filename="chart.png"):
     df = df.copy()
@@ -181,7 +203,6 @@ def generate_pro_chart(df, symbol="STOCK", timeframe="1D", output_filename="char
             df['Date'] = pd.to_datetime(df['Date'])
             df.set_index('Date', inplace=True)
 
-    # Pivot High (PH) dan Pivot Low (PL)
     left_right = 3
     df['PH'] = np.nan
     df['PL'] = np.nan
@@ -195,7 +216,6 @@ def generate_pro_chart(df, symbol="STOCK", timeframe="1D", output_filename="char
         if df['Low'].iloc[i] == low_window.min():
             df.iloc[i, df.columns.get_loc('PL')] = df['Low'].iloc[i]
 
-    # Setup Figure
     fig, (ax_price, ax_vol) = plt.subplots(
         2, 1, figsize=(12, 7), gridspec_kw={'height_ratios': [3, 1]}, sharex=True
     )
@@ -203,7 +223,6 @@ def generate_pro_chart(df, symbol="STOCK", timeframe="1D", output_filename="char
     ax_price.set_facecolor('#1e222d')
     ax_vol.set_facecolor('#1e222d')
 
-    # Plot Candlestick
     dates = df.index
     for i in range(len(df)):
         open_p = df['Open'].iloc[i]
@@ -219,7 +238,7 @@ def generate_pro_chart(df, symbol="STOCK", timeframe="1D", output_filename="char
         vol = df['Volume'].iloc[i]
         ax_vol.bar(dates[i], vol, color=color, alpha=0.6, width=0.6)
 
-    # Plot Label PH/PL Transparan (Tanpa Box Background)
+    # Label PH/PL tanpa bbox
     y_range = df['High'].max() - df['Low'].min()
     offset = y_range * 0.025
 
@@ -229,7 +248,7 @@ def generate_pro_chart(df, symbol="STOCK", timeframe="1D", output_filename="char
             ax_price.text(
                 dates[i], val + offset, f"PH\n{int(val):,}",
                 color='#00e676', fontsize=8, fontweight='bold',
-                ha='center', va='bottom', bbox=dict(boxstyle='none', facecolor='none', edgecolor='none')
+                ha='center', va='bottom'
             )
         
         if not np.isnan(df['PL'].iloc[i]):
@@ -237,10 +256,9 @@ def generate_pro_chart(df, symbol="STOCK", timeframe="1D", output_filename="char
             ax_price.text(
                 dates[i], val - offset, f"PL\n{int(val):,}",
                 color='#ff5252', fontsize=8, fontweight='bold',
-                ha='center', va='top', bbox=dict(boxstyle='none', facecolor='none', edgecolor='none')
+                ha='center', va='top'
             )
 
-    # Styling Axis & Grid
     ax_price.set_title(f"{symbol.upper()} — {timeframe.upper()}", color='white', fontsize=12, fontweight='bold', loc='left')
     ax_price.grid(True, color='#2a2e39', linestyle='--', linewidth=0.5)
     ax_vol.grid(True, color='#2a2e39', linestyle='--', linewidth=0.5)
@@ -257,78 +275,95 @@ def generate_pro_chart(df, symbol="STOCK", timeframe="1D", output_filename="char
 
 
 # ==========================================
-# 4. HANDLER REQUEST & OUTPUT SIGNAL
+# 4. PARALLEL WORKER ENGINE (35 WORKERS)
 # ==========================================
-def process_chart_request(chat_id, stock_code, timeframe="1d"):
-    timeframe = timeframe.lower().strip()
-    tf_clean_map = {
-        'd': '1d', 'day': '1d', 'daily': '1d', '1d': '1d',
-        '15': '15m', '15mi': '15m', 'm15': '15m', '15m': '15m',
-        '30': '30m', '30m': '30m',
-        '60': '1h', '1h': '1h', '60m': '1h'
-    }
-    timeframe = tf_clean_map.get(timeframe, timeframe)
+def process_single_stock(symbol, timeframe="1d", generate_chart=True):
+    """Fungsi pembantu yang dijalankan oleh masing-masing worker"""
+    try:
+        df = fetch_stock_history_multi_tf(symbol, timeframe=timeframe)
+        if df is not None and not df.empty and len(df) >= 50:
+            cols_lower = {str(col).lower().strip(): col for col in df.columns}
+            rename_dict = {}
+            for target, aliases in [
+                ('Open', ['open']), ('High', ['high']), ('Low', ['low']), 
+                ('Close', ['close']), ('Volume', ['volume']),
+                ('Date', ['date', 'datetime', 'time', 't'])
+            ]:
+                for alias in aliases:
+                    if alias in cols_lower:
+                        rename_dict[cols_lower[alias]] = target
+                        break
+            df.rename(columns=rename_dict, inplace=True)
 
-    print(f"\n📊 Processing Data {stock_code} ({timeframe.upper()})...")
-    df = fetch_stock_history_multi_tf(stock_code, timeframe=timeframe)
+            for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
+                if col not in df.columns: df[col] = 0
+
+            if 'Date' in df.columns:
+                df['Date'] = pd.to_datetime(df['Date'])
+                df.set_index('Date', inplace=True)
+
+            is_signal, metrics = analyze_high_probability_signal(df)
+
+            if is_signal:
+                if generate_chart:
+                    out_file = f"signal_{symbol}_{timeframe}.png"
+                    generate_pro_chart(df, symbol=symbol, timeframe=timeframe, output_filename=out_file)
+                return (symbol, metrics, True)
+    except Exception:
+        pass
     
-    if df is not None and not df.empty and len(df) >= 50:
-        # Standardisasi nama kolom
-        cols_lower = {str(col).lower().strip(): col for col in df.columns}
-        rename_dict = {}
-        for target, aliases in [
-            ('Open', ['open']), ('High', ['high']), ('Low', ['low']), 
-            ('Close', ['close']), ('Volume', ['volume']),
-            ('Date', ['date', 'datetime', 'time', 't'])
-        ]:
-            for alias in aliases:
-                if alias in cols_lower:
-                    rename_dict[cols_lower[alias]] = target
-                    break
-        
-        df.rename(columns=rename_dict, inplace=True)
+    return (symbol, None, False)
 
-        for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
-            if col not in df.columns: 
-                df[col] = 0
 
-        if 'Date' in df.columns:
-            df['Date'] = pd.to_datetime(df['Date'])
-            df.set_index('Date', inplace=True)
-        elif not isinstance(df.index, pd.DatetimeIndex):
-            df.index = pd.date_range(end=get_now_wib(), periods=len(df), freq='D' if timeframe == '1d' else '15min')
+def get_watchlist(filepath="stocks.txt"):
+    if os.path.exists(filepath):
+        with open(filepath, 'r') as f:
+            stocks = [line.strip().upper() for line in f if line.strip()]
+            if len(stocks) > 0:
+                print(f"📁 Memuat {len(stocks)} saham dari {filepath}")
+                return stocks
+    print(f"📋 Memuat {len(DEFAULT_300_STOCKS)} saham dari Watchlist Default")
+    return DEFAULT_300_STOCKS
 
-        # Run Analysis
-        is_signal, metrics = analyze_high_probability_signal(df)
-        
-        # Format Output Pesan Sinyal
-        print("───────────── RESUME ANALISIS ─────────────")
-        print(f"📌 Stock           : #{stock_code.upper()}")
-        print(f"💰 Close Price     : Rp {int(metrics['close']):,}")
-        print(f"📊 Volume Spike    : {metrics['vol_ratio']}x SMA20")
-        print(f"📈 RSI (14)        : {metrics['rsi']}")
-        print(f"💵 Value Transaksi : Rp {metrics['value_m']} M")
-        print(f"🎯 Probability     : {metrics['win_probability']}%")
-        print(f"⚡ Status Signal   : {'🔥 HIGH PROBABILITY SIGNAL DETECTED' if is_signal else '❌ NO SIGNAL (Tidak Memenuhi Kriteria Ketat)'}")
-        print("───────────────────────────────────────────")
 
-        # Generate Chart
-        out_file = f"chart_{stock_code}_{timeframe}.png"
-        generate_pro_chart(df, symbol=stock_code, timeframe=timeframe, output_filename=out_file)
-        print(f"✅ Chart disimpan: {out_file}")
-        
-        # Cleanup file opsional
-        if os.path.exists(out_file):
-            os.remove(out_file)
+def run_market_screener_parallel(timeframe="1d", generate_chart=True):
+    watchlist = get_watchlist()
+    total_stocks = len(watchlist)
+    matched_results = []
+
+    print(f"\n🚀 MEMULAI MASS SCREENING PARALEL ({MAX_WORKERS} WORKERS)")
+    print(f"📊 Total Watchlist: {total_stocks} Saham | Timeframe: {timeframe.upper()}")
+    print("=" * 65)
+
+    start_time = time.time()
+    completed_count = 0
+
+    # Eksekusi Multithreading dengan 35 Worker
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {
+            executor.submit(process_single_stock, symbol, timeframe, generate_chart): symbol 
+            for symbol in watchlist
+        }
+
+        for future in as_completed(futures):
+            completed_count += 1
+            symbol, metrics, is_signal = future.result()
             
-    else:
-        print(f"❌ Data saham {stock_code} timeframe {timeframe.upper()} tidak cukup/tidak ditemukan.")
+            print(f" Progress: [{completed_count}/{total_stocks}] - Checking #{symbol}...", end="\r")
+
+            if is_signal:
+                print(f"\n🔥 MATCH: #{symbol} | Vol: {metrics['vol_ratio']}x | RSI: {metrics['rsi']} | Prob: {metrics['win_probability']}%")
+                matched_results.append((symbol, metrics))
+
+    elapsed_time = round(time.time() - start_time, 2)
+    print("\n" + "=" * 65)
+    print(f"⏱️ Screening Selesai dalam {elapsed_time} detik.")
+    print(f"✅ Ditemukan {len(matched_results)} sinyal berkualitas tinggi (≥80%).")
+    return matched_results
 
 
 # ==========================================
-# PEMANGGILAN / UJI COBA
+# EKSEKUSI UTAMA
 # ==========================================
 if __name__ == "__main__":
-    # Pengujian Saham & Timeframe
-    process_chart_request("123456", "ANTM", "1d")
-    process_chart_request("123456", "ANTM", "15m")
+    signals = run_market_screener_parallel(timeframe="1d", generate_chart=True)
