@@ -5,31 +5,36 @@ import pandas as pd
 import numpy as np
 import datetime
 import pytz
+from threading import Thread
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
-# ==========================================
-# KONFIGURASI GLOBAL & API
-# ==========================================
-ARJUM_API_BASE_URL = "https://stock.arjum.com/api"
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-}
-MAX_WORKERS = 35  # Set ke 35 Worker paralel
+try:
+    import telebot
+except ImportError:
+    raise ImportError("Silakan install pyTelegramBotAPI dahulu: pip install pyTelegramBotAPI")
 
 try:
     import yfinance as yf
 except ImportError:
     yf = None
 
+# ==========================================
+# KONFIGURASI CREDENTIAL & GLOBAL
+# ==========================================
+BOT_TOKEN = "8833563003:AAGSx750u_QXWpr91sd3yuD6LcnMXtWWrxQ"
+DEFAULT_CHAT_ID = "5660874676"
 
-def get_now_wib():
-    wib = pytz.timezone('Asia/Jakarta')
-    return datetime.datetime.now(wib)
+ARJUM_API_BASE_URL = "https://stock.arjum.com/api"
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+}
+MAX_WORKERS = 35
 
+bot = telebot.TeleBot(BOT_TOKEN)
 
 # ==========================================
 # DAFTAR 300+ SAHAM IHSG (WATCHLIST DEFAULT)
@@ -66,19 +71,15 @@ DEFAULT_300_STOCKS = [
     "WSBP", "WTON", "YPAS", "ZBRA", "ZYRX"
 ]
 
-
 # ==========================================
-# 1. FETCH DATA MULTI-TIMEFRAME
+# FETCH DATA & INDIKATOR ANALISIS
 # ==========================================
 def fetch_stock_history_multi_tf(symbol, timeframe="1d"):
     timeframe = timeframe.lower().strip()
     yf_tf_map = {
-        '15m': ('15m', '1mo'),
-        '30m': ('30m', '1mo'),
-        '1h':  ('1h',  '3mo'),
-        '1d':  ('1d',  '1y'),
-        '1w':  ('1wk', '2y'),
-        '1mth':('1mo', '5y')
+        '15m': ('15m', '1mo'), '30m': ('30m', '1mo'),
+        '1h':  ('1h',  '3mo'), '1d':  ('1d',  '1y'),
+        '1w':  ('1wk', '2y'),  '1mth':('1mo', '5y')
     }
     yf_setting = yf_tf_map.get(timeframe)
     interval, period = yf_setting if yf_setting else ('1d', '1y')
@@ -130,33 +131,21 @@ def fetch_stock_history_multi_tf(symbol, timeframe="1d"):
     return None
 
 
-# ==========================================
-# 2. INDIKATOR & LOGIKA FILTER SINYAL KETAT
-# ==========================================
 def calculate_indicators(df):
     df = df.copy()
-    
-    # EMA 50 (Major Trend)
     df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
-    
-    # Volume SMA 20 & Ratio
     df['Vol_SMA20'] = df['Volume'].rolling(window=20).mean()
     df['Vol_Ratio'] = df['Volume'] / df['Vol_SMA20'].replace(0, np.nan)
-    
-    # Value Transaksi (Miliar Rp)
     df['Value_Miliard'] = (df['Close'] * df['Volume']) / 1_000_000_000
     
-    # RSI 14
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     rs = gain / loss.replace(0, np.nan)
     df['RSI'] = 100 - (100 / (1 + rs))
     
-    # Candle Body Position
     high_low_range = (df['High'] - df['Low']).replace(0, np.nan)
     df['Close_Position'] = (df['Close'] - df['Low']) / high_low_range
-    
     return df
 
 
@@ -193,9 +182,6 @@ def analyze_high_probability_signal(df):
     return is_valid, metrics
 
 
-# ==========================================
-# 3. GENERATE CHART PRO
-# ==========================================
 def generate_pro_chart(df, symbol="STOCK", timeframe="1D", output_filename="chart.png"):
     df = df.copy()
     if not isinstance(df.index, pd.DatetimeIndex):
@@ -225,39 +211,23 @@ def generate_pro_chart(df, symbol="STOCK", timeframe="1D", output_filename="char
 
     dates = df.index
     for i in range(len(df)):
-        open_p = df['Open'].iloc[i]
-        close_p = df['Close'].iloc[i]
-        high_p = df['High'].iloc[i]
-        low_p = df['Low'].iloc[i]
-        
+        open_p, close_p, high_p, low_p = df['Open'].iloc[i], df['Close'].iloc[i], df['High'].iloc[i], df['Low'].iloc[i]
         color = '#26a69a' if close_p >= open_p else '#ef5350'
         
         ax_price.plot([dates[i], dates[i]], [low_p, high_p], color=color, linewidth=1)
         ax_price.plot([dates[i], dates[i]], [open_p, close_p], color=color, linewidth=4)
-        
-        vol = df['Volume'].iloc[i]
-        ax_vol.bar(dates[i], vol, color=color, alpha=0.6, width=0.6)
+        ax_vol.bar(dates[i], df['Volume'].iloc[i], color=color, alpha=0.6, width=0.6)
 
-    # Label PH/PL tanpa bbox
     y_range = df['High'].max() - df['Low'].min()
     offset = y_range * 0.025
 
     for i in range(len(df)):
         if not np.isnan(df['PH'].iloc[i]):
             val = df['PH'].iloc[i]
-            ax_price.text(
-                dates[i], val + offset, f"PH\n{int(val):,}",
-                color='#00e676', fontsize=8, fontweight='bold',
-                ha='center', va='bottom'
-            )
-        
+            ax_price.text(dates[i], val + offset, f"PH\n{int(val):,}", color='#00e676', fontsize=8, fontweight='bold', ha='center', va='bottom')
         if not np.isnan(df['PL'].iloc[i]):
             val = df['PL'].iloc[i]
-            ax_price.text(
-                dates[i], val - offset, f"PL\n{int(val):,}",
-                color='#ff5252', fontsize=8, fontweight='bold',
-                ha='center', va='top'
-            )
+            ax_price.text(dates[i], val - offset, f"PL\n{int(val):,}", color='#ff5252', fontsize=8, fontweight='bold', ha='center', va='top')
 
     ax_price.set_title(f"{symbol.upper()} — {timeframe.upper()}", color='white', fontsize=12, fontweight='bold', loc='left')
     ax_price.grid(True, color='#2a2e39', linestyle='--', linewidth=0.5)
@@ -275,10 +245,9 @@ def generate_pro_chart(df, symbol="STOCK", timeframe="1D", output_filename="char
 
 
 # ==========================================
-# 4. PARALLEL WORKER ENGINE (35 WORKERS)
+# PARALLEL SCREENER ENGINE (35 WORKERS)
 # ==========================================
 def process_single_stock(symbol, timeframe="1d", generate_chart=True):
-    """Fungsi pembantu yang dijalankan oleh masing-masing worker"""
     try:
         df = fetch_stock_history_multi_tf(symbol, timeframe=timeframe)
         if df is not None and not df.empty and len(df) >= 50:
@@ -315,30 +284,14 @@ def process_single_stock(symbol, timeframe="1d", generate_chart=True):
     return (symbol, None, False)
 
 
-def get_watchlist(filepath="stocks.txt"):
-    if os.path.exists(filepath):
-        with open(filepath, 'r') as f:
-            stocks = [line.strip().upper() for line in f if line.strip()]
-            if len(stocks) > 0:
-                print(f"📁 Memuat {len(stocks)} saham dari {filepath}")
-                return stocks
-    print(f"📋 Memuat {len(DEFAULT_300_STOCKS)} saham dari Watchlist Default")
-    return DEFAULT_300_STOCKS
-
-
 def run_market_screener_parallel(timeframe="1d", generate_chart=True):
-    watchlist = get_watchlist()
+    watchlist = DEFAULT_300_STOCKS
     total_stocks = len(watchlist)
     matched_results = []
 
     print(f"\n🚀 MEMULAI MASS SCREENING PARALEL ({MAX_WORKERS} WORKERS)")
     print(f"📊 Total Watchlist: {total_stocks} Saham | Timeframe: {timeframe.upper()}")
-    print("=" * 65)
 
-    start_time = time.time()
-    completed_count = 0
-
-    # Eksekusi Multithreading dengan 35 Worker
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {
             executor.submit(process_single_stock, symbol, timeframe, generate_chart): symbol 
@@ -346,24 +299,85 @@ def run_market_screener_parallel(timeframe="1d", generate_chart=True):
         }
 
         for future in as_completed(futures):
-            completed_count += 1
             symbol, metrics, is_signal = future.result()
-            
-            print(f" Progress: [{completed_count}/{total_stocks}] - Checking #{symbol}...", end="\r")
-
             if is_signal:
-                print(f"\n🔥 MATCH: #{symbol} | Vol: {metrics['vol_ratio']}x | RSI: {metrics['rsi']} | Prob: {metrics['win_probability']}%")
+                print(f"🔥 MATCH: #{symbol} | Vol: {metrics['vol_ratio']}x | RSI: {metrics['rsi']} | Prob: {metrics['win_probability']}%")
                 matched_results.append((symbol, metrics))
 
-    elapsed_time = round(time.time() - start_time, 2)
-    print("\n" + "=" * 65)
-    print(f"⏱️ Screening Selesai dalam {elapsed_time} detik.")
-    print(f"✅ Ditemukan {len(matched_results)} sinyal berkualitas tinggi (≥80%).")
     return matched_results
 
 
 # ==========================================
-# EKSEKUSI UTAMA
+# TELEGRAM INTEGRATION & BOT HANDLER
+# ==========================================
+def send_telegram_signal(chat_id, symbol, metrics, timeframe="1d"):
+    caption = (
+        f"🔥 *THE RAFANO SIGNAL: #{symbol}* 🔥\n\n"
+        f"💵 *Close Price:* {metrics['close']:,}\n"
+        f"📊 *Volume Ratio:* {metrics['vol_ratio']}x\n"
+        f"🎯 *RSI (14):* {metrics['rsi']}\n"
+        f"📈 *EMA 50:* {metrics['ema50']:,}\n"
+        f"💰 *Value Transaksi:* {metrics['value_m']} Miliar\n"
+        f"⚡ *Win Probability:* {metrics['win_probability']}%\n"
+    )
+    chart_file = f"signal_{symbol}_{timeframe}.png"
+    
+    try:
+        if os.path.exists(chart_file):
+            with open(chart_file, 'rb') as photo:
+                bot.send_photo(chat_id, photo, caption=caption, parse_mode="Markdown")
+            os.remove(chart_file)  # Hapus file setelah dikirim
+        else:
+            bot.send_message(chat_id, caption, parse_mode="Markdown")
+    except Exception as e:
+        print(f"Gagal mengirim sinyal ke Telegram ({symbol}): {e}")
+
+
+@bot.message_handler(commands=['start', 'help'])
+def send_welcome(message):
+    welcome_text = (
+        "🤖 *RAFANO SIGNAL BOT ACTIVE*\n\n"
+        "Gunakan perintah berikut:\n"
+        "`/screen` - Jalankan screening massal 300+ saham\n"
+        "`/ping` - Cek status keaktifan bot"
+    )
+    bot.reply_to(message, welcome_text, parse_mode="Markdown")
+
+
+@bot.message_handler(commands=['ping'])
+def send_ping(message):
+    bot.reply_to(message, "🏓 Pong! Bot aktif dan siap mendengarkan perintah.")
+
+
+@bot.message_handler(commands=['screen'])
+def handle_screen_command(message):
+    chat_id = message.chat.id
+    bot.reply_to(message, "🚀 Memulai screening 300+ saham (35 Workers)... Mohon tunggu beberapa detik.")
+    
+    # Dijalankan di Thread terpisah agar listener bot tidak freeze
+    def worker_thread():
+        results = run_market_screener_parallel(timeframe="1d", generate_chart=True)
+        if not results:
+            bot.send_message(chat_id, "❌ Tidak ditemukan sinyal saham yang memenuhi kriteria (≥80%).")
+        else:
+            bot.send_message(chat_id, f"✅ Screening Selesai! Ditemukan {len(results)} sinyal potensial:")
+            for symbol, metrics in results:
+                send_telegram_signal(chat_id, symbol, metrics, "1d")
+
+    Thread(target=worker_thread).start()
+
+
+# ==========================================
+# EKSEKUSI UTAMA BOT
 # ==========================================
 if __name__ == "__main__":
-    signals = run_market_screener_parallel(timeframe="1d", generate_chart=True)
+    print(f"🤖 Bot 'The Rafano Signal' Aktif...")
+    print(f"📡 Chat ID Target: {DEFAULT_CHAT_ID}")
+    
+    # Kirim notifikasi boot up saat pertama kali dinyalakan
+    try:
+        bot.send_message(DEFAULT_CHAT_ID, "🚀 *Bot Trading Signal Online!* Kirim perintah `/screen` untuk memulai.", parse_mode="Markdown")
+    except Exception as e:
+        print(f"Warning: Tidak dapat mengirim pesan awal ke {DEFAULT_CHAT_ID}: {e}")
+
+    bot.infinity_polling()
