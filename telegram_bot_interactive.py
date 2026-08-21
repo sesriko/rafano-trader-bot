@@ -336,7 +336,7 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
                 latest_setup = {"status": "BUY ACCUMULATION", "entry": buy_price, "tp1": tp1_price, "tp2": tp2_price, "danger": danger_price}
                 last_signal_idx = i
 
-        # Dashboard dipindah ke sebelah kiri (x=0.015)
+        # Dashboard di sebelah kiri
         status_color = "#00ff00" if latest_setup["status"] == "BUY ACCUMULATION" else "#ffff00"
         dashboard_text = (
             f"   📊 RAFANO TRADER DASHBOARD   \n"
@@ -356,12 +356,11 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
                      fontfamily='monospace', fontsize=9, color=status_color,
                      bbox=dict(boxstyle='round,pad=0.5', facecolor='#000000', alpha=0.88, edgecolor='#444444'))
 
-        # Label harga/pivot dipindahkan ke luar axis (di sebelah kanan area plot, misal di indeks len(df) + 1)
+        # Label harga/pivot di luar axis sebelah kanan
         latest_ph, latest_pl = df['Pivot_High'].iloc[-1], df['Pivot_Low'].iloc[-1]
         ax_main.text(len(df) + 1.0, latest_ph, f" PH: {safe_int(latest_ph)} ", color='black', backgroundcolor='#ffff00', fontsize=8.5, fontweight='bold', va='center', ha='left')
         ax_main.text(len(df) + 1.0, latest_pl, f" PL: {safe_int(latest_pl)} ", color='black', backgroundcolor='#00ffff', fontsize=8.5, fontweight='bold', va='center', ha='left')
 
-        # Perlebar batas kanan axis agar label luar tidak terpotong
         ax_main.set_xlim(-4, len(df) + 6)
         ax_main.set_ylim(df['Low'].min() * 0.90, df['High'].max() * 1.10)
 
@@ -399,8 +398,6 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
         mm_colors = ['#ffff00' if v >= 0 else '#555555' for v in df['MM']]
         ax_mm.bar(x_indices, df['MM'], color=mm_colors, width=0.4)
         ax_mm.text(0.01, 0.85, "Market Maker", transform=ax_mm.transAxes, color='#ffff00', fontsize=8.5, fontweight='bold')
-        
-        # Label Market Maker dipindah ke luar axis di sisi kanan
         ax_mm.text(len(df) + 1.0, df['MM'].iloc[-1], f"{df['MM'].iloc[-1]:.4f}", color='black', backgroundcolor='#ffff00', fontsize=8.5, fontweight='bold', va='center', ha='left')
 
         step = max(1, len(df) // 8)
@@ -468,7 +465,7 @@ def fetch_stock_history_multi_tf(symbol, timeframe="1d"):
             pass
     return None
 
-def scan_single_symbol_tf(symbol, timeframe="5m"):
+def scan_single_symbol_tf(symbol, timeframe="15m"):
     try:
         df = fetch_stock_history_multi_tf(symbol, timeframe=timeframe)
         if df is not None and len(df) >= 20:
@@ -483,7 +480,7 @@ def scan_single_symbol_tf(symbol, timeframe="5m"):
         pass
     return None
 
-def run_scan_process_custom_tf(timeframe="5m"):
+def run_scan_process_custom_tf(timeframe="15m"):
     detected_signals = []
     with ThreadPoolExecutor(max_workers=15) as executor:
         futures = [executor.submit(scan_single_symbol_tf, sym, timeframe) for sym in TOP_300_IHSG]
@@ -589,15 +586,11 @@ def auto_screener_loop():
                 broadcast_screening_results(signals_eod, "POWER ACCUMULATION VSA — END OF DAY (DAILY)", "1d")
                 last_triggered_eod = today_str
 
-            # Real-Time Spike Scanner saat Market Buka
+            # Real-Time Spike Scanner saat Market Buka (Hanya Daily/1D)
             if is_market_open():
                 signals_daily = run_scan_process_custom_tf(timeframe="1d")
                 if signals_daily:
                     broadcast_screening_results(signals_daily, "🔥 REAL-TIME SIGNAL — DAILY (1D) BUY ACCUMULATION", "1d")
-
-                signals_5m = run_scan_process_custom_tf(timeframe="5m")
-                if signals_5m:
-                    broadcast_screening_results(signals_5m, "⚡ REAL-TIME SIGNAL — INTRADAY (5M) ACCUMULATION", "5m")
 
                 time.sleep(300)
             else:
@@ -613,7 +606,6 @@ def auto_screener_loop():
 def process_chart_request(chat_id, stock_code, timeframe="1d"):
     timeframe = timeframe.lower().strip()
     if timeframe in ['d', 'day', 'daily', '1d']: timeframe = '1d'
-    if timeframe in ['5', '5mi', 'm5']: timeframe = '5m'
     if timeframe in ['15', '15mi', 'm15']: timeframe = '15m'
 
     send_reply(chat_id, f"📊 *Generating Clean Chart {stock_code} ({timeframe.upper()})...*")
@@ -635,7 +627,7 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
                 df['Date'] = pd.to_datetime(df['Date'])
             df.set_index('Date', inplace=True)
         elif not isinstance(df.index, pd.DatetimeIndex):
-            df.index = pd.date_range(end=get_now_wib(), periods=len(df), freq='D' if timeframe == '1d' else '5min')
+            df.index = pd.date_range(end=get_now_wib(), periods=len(df), freq='D' if timeframe == '1d' else '15min')
 
         out_file = f"chart_{stock_code}_{timeframe}.png"
         generate_pro_chart(df, symbol=stock_code, timeframe=timeframe, output_filename=out_file)
@@ -694,7 +686,7 @@ def main():
                             help_msg = (
                                 "🤖 *RAFANO TRADER BOT COMMANDS*\n\n"
                                 "• `/scan` or `/screen` : Run real-time screening across Top 300 IHSG\n"
-                                "• `/c TICKER [TF]` : Generate chart (e.g., `/c ANTM 1d` or `/c BBCA 5m`)\n"
+                                "• `/c TICKER [TF]` : Generate chart (e.g., `/c ANTM 1d` or `/c BBCA 15m`)\n"
                                 "• `/screener_on` : Enable auto screener background task\n"
                                 "• `/screener_off` : Disable auto screener background task"
                             )
