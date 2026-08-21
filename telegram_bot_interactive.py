@@ -35,7 +35,7 @@ from threading import Thread
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import matplotlib
-matplotlib.use('Agg')  # Wajib 'Agg' agar headless di Colab
+matplotlib.use('Agg')  # Wajib 'Agg' agar headless/tanpa GUI di Colab
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
@@ -57,9 +57,8 @@ MAX_WORKERS = 35
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # ==========================================
-# DAFTAR 300 SAHAM IHSG AKTIF (EKSKLUDI FCA)
+# DAFTAR 300 SAHAM IHSG AKTIF (NON-FCA)
 # ==========================================
-# Saham yang masuk papan FCA (Harga 50 kebawah / Notasi Khusus) disaring secara ketat
 DEFAULT_300_STOCKS = [
     "AALI", "ABMM", "ACES", "ADHI", "ADRO", "AGRO", "AKRA", "AMAR", "AMRT", "ANTM",
     "APLN", "ARTO", "ASGR", "ASII", "AUTO", "AVIA", "AXIO", "BBYB", "BBCA", "BBNI",
@@ -73,24 +72,29 @@ DEFAULT_300_STOCKS = [
     "PGAS", "PNBN", "PNLF", "POWR", "PTBA", "PTPP", "PTRO", "PWON", "RAJA", "RALS",
     "ROTI", "SAME", "SCMA", "SIDO", "SMAR", "SMGR", "SMRA", "SMSM", "SRTG", "SSMS",
     "TAPG", "TPIA", "TLKM", "TOWR", "TRIM", "TSPC", "ULTJ", "UNVR", "WIKA", "WOOD",
-    "WTON", "AMMN", "MBMA", "CMRY", "BDRX", "AUTO", "MTAA", "BELI", "MCOL", "MMLP",
-    "NGLO", "RUIS", "SCCC", "TIN2", "TINS", "TOTL", "TOBA", "UCID", "WEGE", "WIIM"
+    "WTON", "AMMN", "MBMA", "CMRY", "BDRX", "MTAA", "BELI", "MCOL", "MMLP", "NGLO",
+    "RUIS", "SCCC", "TINS", "TOTL", "TOBA", "UCID", "WEGE", "WIIM", "FUTR", "GIAA"
 ]
 
 # ==========================================
-# FETCH DATA & INDIKATOR ANALISIS
+# MULTI-TIMEFRAME FETCHING ENGINE
 # ==========================================
 def fetch_stock_history_multi_tf(symbol, timeframe="1d"):
-    timeframe = timeframe.lower().strip()
+    tf = timeframe.lower().strip()
+    
     yf_tf_map = {
-        '15m': ('15m', '1mo'), '30m': ('30m', '1mo'),
-        '1h':  ('1h',  '3mo'), '1d':  ('1d',  '1y'),
-        '1w':  ('1wk', '2y'),  '1mth':('1mo', '5y')
+        '15m':  ('15m',  '1mo'),
+        '30m':  ('30m',  '1mo'),
+        '1h':   ('60m',  '3mo'),
+        '1d':   ('1d',   '1y'),
+        '1w':   ('1wk',  '2y'),
+        '1mth': ('1mo',  '5y')
     }
-    yf_setting = yf_tf_map.get(timeframe)
-    interval, period = yf_setting if yf_setting else ('1d', '1y')
+    
+    interval, period = yf_tf_map.get(tf, ('1d', '1y'))
 
-    if interval == '1d':
+    # API Lokal hanya khusus timeframe harian (1d)
+    if tf == '1d':
         endpoints = [
             f"{ARJUM_API_BASE_URL}/history/{symbol}?interval=1d&limit=150",
             f"{ARJUM_API_BASE_URL}/klines?symbol={symbol}&interval=1d"
@@ -108,6 +112,7 @@ def fetch_stock_history_multi_tf(symbol, timeframe="1d"):
             except Exception:
                 pass
 
+    # Yahoo Finance Handler (Intraday & Multi-Timeframe)
     if yf is not None:
         try:
             yf_symbol = symbol if (symbol.endswith(".JK") or not symbol.isalpha()) else f"{symbol}.JK"
@@ -121,9 +126,11 @@ def fetch_stock_history_multi_tf(symbol, timeframe="1d"):
                 df_yf.reset_index(inplace=True)
                 df_yf.columns = [str(c).capitalize() for c in df_yf.columns]
 
-                date_col = 'Date' if 'Date' in df_yf.columns else ('Datetime' if 'Datetime' in df_yf.columns else None)
+                date_col = 'Datetime' if 'Datetime' in df_yf.columns else ('Date' if 'Date' in df_yf.columns else None)
                 if date_col:
-                    df_yf['Date'] = pd.to_datetime(df_yf[date_col]).dt.tz_localize(None)
+                    df_yf['Date'] = pd.to_datetime(df_yf[date_col])
+                    if df_yf['Date'].dt.tz is not None:
+                        df_yf['Date'] = df_yf['Date'].dt.tz_convert('Asia/Jakarta').dt.tz_localize(None)
 
                 for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
                     if col in df_yf.columns:
@@ -132,14 +139,14 @@ def fetch_stock_history_multi_tf(symbol, timeframe="1d"):
                 df_clean = df_yf.dropna(subset=['Close']).copy()
                 df_clean['Symbol_Owner'] = symbol
                 return df_clean
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error fetching {symbol} ({tf}): {e}")
+            
     return None
 
 
 def calculate_indicators(df):
     df = df.copy()
-    # Menggunakan EMA 50 untuk momentum intraday/short-term
     df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
     df['Vol_SMA20'] = df['Volume'].rolling(window=20).mean()
     df['Vol_Ratio'] = df['Volume'] / df['Vol_SMA20'].replace(0, np.nan)
@@ -157,13 +164,13 @@ def calculate_indicators(df):
 
 
 def analyze_high_probability_signal(df):
-    if df is None or len(df) < 50:
+    if df is None or len(df) < 30:
         return False, None, None
     
     df = calculate_indicators(df)
     last = df.iloc[-1]
     
-    # Filter Saham FCA / Saham Tidur (Harga < 50 atau Transaksi < 1 Miliar)
+    # Filter FCA & Saham Tidur (Harga <= 50 atau Value Transaksi < 1M)
     if last['Close'] <= 50 or last['Value_Miliard'] < 1.0:
         return False, None, None
     
@@ -171,7 +178,7 @@ def analyze_high_probability_signal(df):
     c_bullish_candle = (last['Close'] > last['Open']) and (last['Close_Position'] >= 0.60)
     c_trend = last['Close'] > last['EMA50']
     c_rsi = 50 <= last['RSI'] <= 78
-    c_liquidity = last['Value_Miliard'] >= 2.0
+    c_liquidity = last['Value_Miliard'] >= 1.5
     
     score = 0
     if c_vol_spike: score += 35
@@ -208,7 +215,6 @@ def generate_pro_chart_memory(df, symbol="STOCK", timeframe="1D", metrics=None):
         df['Upper_Donchian'] = df['High'].rolling(20).max()
         df['Lower_Donchian'] = df['Low'].rolling(20).min()
 
-        # Custom Market Maker Indicator
         df['MM_Hist'] = (df['Close'] - df['Open']) / (df['High'] - df['Low']).replace(0, np.nan) * (df['Volume'] / df['Volume'].rolling(20).mean()) * 100
         df['MM_Hist'] = df['MM_Hist'].fillna(0)
         df['Buy_Signal'] = (df['Close'] > df['Open']) & (df['Volume'] > df['Volume'].rolling(20).mean() * 1.8)
@@ -290,7 +296,13 @@ def generate_pro_chart_memory(df, symbol="STOCK", timeframe="1D", metrics=None):
         plt.setp(ax_price.get_xticklabels(), visible=False)
         plt.setp(ax_tape.get_xticklabels(), visible=False)
         plt.setp(ax_vol.get_xticklabels(), visible=False)
-        ax_mm.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+        
+        # Format X-Axis tergantung Timeframe (Intraday / Daily)
+        if timeframe in ['15m', '30m', '1h']:
+            ax_mm.xaxis.set_major_formatter(mdates.DateFormatter('%d %b %H:%M'))
+        else:
+            ax_mm.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
+            
         fig.autofmt_xdate()
 
         buf = io.BytesIO()
@@ -310,7 +322,7 @@ def generate_pro_chart_memory(df, symbol="STOCK", timeframe="1D", metrics=None):
 def process_single_stock(symbol, timeframe="1d"):
     try:
         df = fetch_stock_history_multi_tf(symbol, timeframe=timeframe)
-        if df is not None and not df.empty and len(df) >= 50:
+        if df is not None and not df.empty and len(df) >= 30:
             cols_lower = {str(col).lower().strip(): col for col in df.columns}
             rename_dict = {}
             for target, aliases in [
@@ -365,11 +377,11 @@ def run_market_screener_parallel(timeframe="1d"):
 
 
 # ==========================================
-# TELEGRAM INTEGRATION & BOT HANDLER
+# TELEGRAM INTEGRATION & BOT HANDLERS
 # ==========================================
 def send_telegram_signal(chat_id, symbol, metrics, df_stock=None, timeframe="1d"):
     caption = (
-        f"🔥 *THE RAFANO SIGNAL: #{symbol}* 🔥\n\n"
+        f"🔥 *THE RAFANO SIGNAL: #{symbol}* [{timeframe.upper()}] 🔥\n\n"
         f"💵 *Close Price:* {metrics['close']:,}\n"
         f"📊 *Volume Ratio:* {metrics['vol_ratio']}x\n"
         f"🎯 *RSI (14):* {metrics['rsi']}\n"
@@ -396,7 +408,10 @@ def send_welcome(message):
     welcome_text = (
         "🤖 *RAFANO SIGNAL BOT ACTIVE*\n\n"
         "Gunakan perintah berikut:\n"
-        "`/screen` - Jalankan screening massal 300 saham non-FCA\n"
+        "`/c` - Screening massal timeframe 1D (Default)\n"
+        "`/c 1h` - Screening massal timeframe 1 Jam\n"
+        "`/c 15m` - Screening massal timeframe 15 Menit\n"
+        "`/c kaef 1h` - Tampilkan chart spesifik KAEF [1H]\n"
         "`/ping` - Cek status keaktifan bot"
     )
     bot.reply_to(message, welcome_text, parse_mode="Markdown")
@@ -407,19 +422,71 @@ def send_ping(message):
     bot.reply_to(message, "🏓 Pong! Bot aktif dan siap mendengarkan perintah.")
 
 
-@bot.message_handler(commands=['screen'])
-def handle_screen_command(message):
+# HANDLER UTAMA UNTUK COMMAND /c
+@bot.message_handler(commands=['c'])
+def handle_chart_command(message):
     chat_id = message.chat.id
-    bot.reply_to(message, "🚀 Memulai screening 300 saham aktif Non-FCA... Mohon tunggu beberapa detik.")
+    args = message.text.split()[1:]  # Ambil parameter setelah /c
+    
+    timeframes_valid = ['15m', '30m', '1h', '1d', '1w']
+    
+    # KASUS 1: Panggilan Saham Spesifik (Contoh: /c kaef 1h atau /c kaef)
+    if len(args) >= 1 and args[0].lower() not in timeframes_valid:
+        symbol = args[0].upper()
+        timeframe = args[1].lower() if len(args) > 1 and args[1].lower() in timeframes_valid else "1d"
+        
+        bot.reply_to(message, f"🔍 Mengambil data & chart #{symbol} [{timeframe.upper()}]...")
+        
+        def single_stock_thread():
+            df = fetch_stock_history_multi_tf(symbol, timeframe=timeframe)
+            if df is not None and not df.empty:
+                cols_lower = {str(col).lower().strip(): col for col in df.columns}
+                rename_dict = {}
+                for target, aliases in [
+                    ('Open', ['open']), ('High', ['high']), ('Low', ['low']), 
+                    ('Close', ['close']), ('Volume', ['volume']),
+                    ('Date', ['date', 'datetime', 'time', 't'])
+                ]:
+                    for alias in aliases:
+                        if alias in cols_lower:
+                            rename_dict[cols_lower[alias]] = target
+                            break
+                df.rename(columns=rename_dict, inplace=True)
+                
+                if 'Date' in df.columns:
+                    df['Date'] = pd.to_datetime(df['Date'])
+                    df.set_index('Date', inplace=True)
+
+                df = calculate_indicators(df)
+                last = df.iloc[-1]
+                metrics = {
+                    'close': float(last['Close']),
+                    'vol_ratio': round(float(last['Vol_Ratio']), 2) if not pd.isna(last['Vol_Ratio']) else 0.0,
+                    'rsi': round(float(last['RSI']), 2) if not pd.isna(last['RSI']) else 0.0,
+                    'value_m': round(float(last['Value_Miliard']), 2) if not pd.isna(last['Value_Miliard']) else 0.0,
+                    'ema50': round(float(last['EMA50']), 2) if not pd.isna(last['EMA50']) else 0.0,
+                    'win_probability': 85
+                }
+                send_telegram_signal(chat_id, symbol, metrics, df_stock=df, timeframe=timeframe)
+            else:
+                bot.send_message(chat_id, f"❌ Data saham #{symbol} tidak ditemukan pada timeframe {timeframe.upper()}.")
+
+        Thread(target=single_stock_thread).start()
+        return
+
+    # KASUS 2: Mass Screening (Contoh: /c atau /c 1h atau /c 15m)
+    timeframe = args[0].lower() if len(args) > 0 and args[0].lower() in timeframes_valid else "1d"
+    
+    bot.reply_to(message, f"🚀 Memulai mass screening 300 saham [{timeframe.upper()}]... Mohon tunggu beberapa detik.")
     
     def worker_thread():
-        results = run_market_screener_parallel(timeframe="1d")
+        results = run_market_screener_parallel(timeframe=timeframe)
         if not results:
-            bot.send_message(chat_id, "❌ Tidak ditemukan sinyal saham yang memenuhi kriteria (≥80%).")
+            bot.send_message(chat_id, f"❌ Tidak ditemukan sinyal saham yang memenuhi kriteria pada timeframe {timeframe.upper()}.")
         else:
-            bot.send_message(chat_id, f"✅ Screening Selesai! Ditemukan {len(results)} sinyal potensial:")
+            bot.send_message(chat_id, f"✅ Screening Selesai! Ditemukan {len(results)} sinyal [{timeframe.upper()}]:")
             for symbol, metrics, df_stock in results:
-                send_telegram_signal(chat_id, symbol, metrics, df_stock=df_stock, timeframe="1d")
+                send_telegram_signal(chat_id, symbol, metrics, df_stock=df_stock, timeframe=timeframe)
 
     Thread(target=worker_thread).start()
 
@@ -432,7 +499,7 @@ if __name__ == "__main__":
     print(f"📡 Chat ID Target: {DEFAULT_CHAT_ID}")
     
     try:
-        bot.send_message(DEFAULT_CHAT_ID, "🚀 *Bot Trading Signal Online!* Kirim perintah `/screen` untuk memulai.", parse_mode="Markdown")
+        bot.send_message(DEFAULT_CHAT_ID, "🚀 *Bot Trading Signal Online!* Kirim `/c` atau `/c 1h` untuk memulai.", parse_mode="Markdown")
     except Exception as e:
         print(f"Warning: Tidak dapat mengirim pesan awal ke {DEFAULT_CHAT_ID}: {e}")
 
