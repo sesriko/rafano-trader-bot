@@ -242,7 +242,7 @@ def check_volume_spike_signal(df, symbol, threshold_multiplier=1.2, min_value_tr
 def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industrial Sector | IHSG", output_filename="chart_output.png"):
     try:
         tf_clean = timeframe.lower().strip()
-        is_intraday = tf_clean in ['1m', '5m', '15m', '30m', '1h']
+        is_intraday = tf_clean in ['1m', '15m', '30m', '1h']
 
         df.columns = [str(col).lower().capitalize() for col in df.columns]
         df = df.ffill().bfill()
@@ -421,9 +421,8 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
 def fetch_stock_history_multi_tf(symbol, timeframe="1d"):
     timeframe = timeframe.lower().strip()
     yf_tf_map = {
-        '1m': ('1m', '1d'), '5m': ('5m', '5d'), '15m': ('15m', '1mo'),
-        '30m': ('30m', '1mo'), '1h': ('1h', '3mo'), '1d': ('1d', '1y'),
-        '1w': ('1wk', '2y'), '1mth': ('1mo', '5y')
+        '15m': ('15m', '1mo'), '30m': ('30m', '1mo'), '1h': ('1h', '3mo'), 
+        '1d': ('1d', '1y'), '1w': ('1wk', '2y'), '1mth': ('1mo', '5y')
     }
     yf_setting = yf_tf_map.get(timeframe)
     interval, period = yf_setting if yf_setting else ('1d', '1y')
