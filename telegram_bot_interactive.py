@@ -7,7 +7,7 @@ import numpy as np
 import pytz
 from datetime import datetime
 
-# 1. SETUP BACKEND MATPLOTLIB WAJIB DI AWAL SEBELUM PLT DIIUMPORT
+# Setup Backend Matplotlib untuk Headless Server / Colab
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -17,7 +17,7 @@ import matplotlib.patches as patches
 # ==========================================
 # KONFIGURASI BOT & TIMEZONE
 # ==========================================
-BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"  # Ganti dengan Token Bot Anda
+BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"  # Ganti dengan Token Bot Telegram Anda
 WIB = pytz.timezone('Asia/Jakarta')
 
 def get_now_wib():
@@ -105,8 +105,26 @@ def calculate_vsa_metrics(df):
     
     return df, buy_ratio.tolist()
 
+# FUNGSI UNTUK MENGHITUNG INDIKATOR UTAMA AGAR TIDAK REPEAT / KEYERROR
+def apply_technical_indicators(df):
+    df.columns = [str(col).lower().capitalize() for col in df.columns]
+    df = df.ffill().bfill()
+    
+    df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
+    df['RSI14'] = calculate_rsi(df['Close'], period=14)
+    df['ATR'] = calculate_atr(df, period=14)
+    df['Pivot_High'] = df['High'].rolling(window=12, min_periods=1).max()
+    df['Pivot_Low'] = df['Low'].rolling(window=12, min_periods=1).min()
+    df['V1'] = df['Volume'].rolling(20, min_periods=1).mean()
+    df, _ = calculate_vsa_metrics(df)
+    
+    if 'MM' not in df.columns:
+        df['MM'] = (df['Close'] - df['EMA50']) / df['EMA50'] * 1000 + np.sin(np.linspace(0, 10, len(df))) * 15 - 10.9258
+        
+    return df
+
 def calculate_buy_signal_strength(df):
-    if len(df) < 5:
+    if len(df) < 5 or 'EMA50' not in df.columns:
         return 50, "NEUTRAL"
     
     c_last = df['Close'].iloc[-1]
@@ -125,30 +143,26 @@ def calculate_buy_signal_strength(df):
     if buy_ratio >= 0.55: score += 20
     if net_5d_vol > 0: score += 20
     
-    if score >= 80: label = "VERY STRONG "
-    elif score >= 60: label = "STRONG "
-    elif score >= 40: label = "MODERATE "
-    else: label = "WEAK "
+    if score >= 80: label = "VERY STRONG 🚀"
+    elif score >= 60: label = "STRONG 🔥"
+    elif score >= 40: label = "MODERATE ⚖️"
+    else: label = "WEAK ⚠️"
         
     return score, label
 
 # ==========================================
-# FETCH DATA SAHAM (MULTI-ENDPOINT ROUTER)
+# FETCH DATA SAHAM
 # ==========================================
 def fetch_stock_history_multi_tf(symbol, timeframe="1d"):
     symbol_clean = symbol.upper().replace(".JK", "").strip()
     symbol_formatted = f"{symbol_clean}.JK"
     
     interval_map = {'1m':'1m', '5m':'5m', '15m':'15m', '30m':'30m', '1h':'60m', '1d':'1d', '1w':'1wk'}
-    period_map = {'1m':'5d', '5m':'5d', '15m':'1mo', '30m':'1mo', '1h':'3mo', '1d':'1y', '1w':'2y'}
-    
     tf_clean = timeframe.lower().strip()
     interval = interval_map.get(tf_clean, '1d')
-    period = period_map.get(tf_clean, '1y')
     
     df = None
     
-    # Method 1: Direct Yahoo API Query (Lebih Stabil daripada Lib yfinance)
     try:
         end_time = int(time.time())
         days_back = 5 if tf_clean in ['1m', '5m', '15m'] else (30 if tf_clean in ['30m', '1h'] else 365)
@@ -174,10 +188,10 @@ def fetch_stock_history_multi_tf(symbol, timeframe="1d"):
     except Exception as e:
         print(f"Direct API Error: {e}")
 
-    # Method 2: Fallback yfinance jika Direct API gagal
     if df is None or df.empty:
         try:
             import yfinance as yf
+            period = '5d' if tf_clean in ['1m', '5m', '15m'] else '1y'
             ticker = yf.Ticker(symbol_formatted)
             df = ticker.history(period=period, interval=interval)
         except Exception as e:
@@ -195,25 +209,18 @@ def fetch_stock_history_multi_tf(symbol, timeframe="1d"):
     return None
 
 # ==========================================
-# RENDER CHART ENGINE (FIXED AXIS & INTRADAY)
+# RENDER CHART ENGINE
 # ==========================================
 def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="IDX | RAFANO TRADER ENGINE", output_filename="chart_output.png"):
     try:
         tf_clean = timeframe.lower().strip()
         is_intraday = tf_clean in ['1m', '5m', '15m', '30m', '1h']
 
-        df.columns = [str(col).lower().capitalize() for col in df.columns]
-        df = df.ffill().bfill()
+        df = apply_technical_indicators(df)
 
-        # Kalkulasi Parameter
-        df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
-        df['RSI14'] = calculate_rsi(df['Close'], period=14)
-        df['Trend_Curve'] = df['EMA50']
-        df['ATR'] = calculate_atr(df, period=14)
-
-        df['Pivot_High'] = df['High'].rolling(window=12, min_periods=1).max()
-        df['Pivot_Low'] = df['Low'].rolling(window=12, min_periods=1).min()
-        df['V1'] = df['Volume'].rolling(20, min_periods=1).mean()
+        last_close, last_open = df['Close'].iloc[-1], df['Open'].iloc[-1]
+        last_high, last_low = df['High'].iloc[-1], df['Low'].iloc[-1]
+        last_vol = df['Volume'].iloc[-1]
 
         df, buy_ratios = calculate_vsa_metrics(df)
         net_5d_vol = df['Net_Vol_VSA'].tail(5).sum()
@@ -221,9 +228,6 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="IDX | RAF
         last_rsi = round(df['RSI14'].iloc[-1], 2)
         
         signal_score, score_lbl = calculate_buy_signal_strength(df)
-
-        if 'MM' not in df.columns:
-            df['MM'] = (df['Close'] - df['EMA50']) / df['EMA50'] * 1000 + np.sin(np.linspace(0, 10, len(df))) * 15 - 10.9258
 
         plt.style.use('dark_background')
         fig = plt.figure(figsize=(18, 10), dpi=150, facecolor='#000000')
@@ -261,7 +265,7 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="IDX | RAF
                 rect = patches.Rectangle((i - 0.35, body_bottom), 0.7, body_height, linewidth=1.2, edgecolor=color_down, facecolor=color_down)
                 ax_main.add_patch(rect)
 
-        ax_main.plot(x_indices, df['Trend_Curve'], color='#ffffff', linewidth=1.5, linestyle='-')
+        ax_main.plot(x_indices, df['EMA50'], color='#ffffff', linewidth=1.5, linestyle='-')
         ax_main.step(x_indices, df['Pivot_High'], where='mid', color='#555555', linestyle='--', linewidth=1.0)
         ax_main.step(x_indices, df['Pivot_Low'], where='mid', color='#444444', linestyle=':', linewidth=1.0)
 
@@ -299,9 +303,7 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="IDX | RAF
         ax_main.set_ylim(df['Low'].min() * 0.95, df['High'].max() * 1.25)
         ax_main.set_xlim(-4, len(df) + 2)
 
-        # Visual Overlay Dashboard
-        last_open, last_high, last_low, last_close, last_vol = df['Open'].iloc[-1], df['High'].iloc[-1], df['Low'].iloc[-1], df['Close'].iloc[-1], df['Volume'].iloc[-1]
-        
+        # Dashboard Box
         status_color = "#00ff00" if latest_setup["status"] == "BUY ACCUMULATION" else "#ffff00"
         dashboard_text = (
             f" 📊 RAFANO TRADER DASHBOARD\n"
@@ -337,7 +339,7 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="IDX | RAF
         fig.text(0.88, 0.975, f"{tf_clean.upper()} {get_now_wib().strftime('%d %b %Y')}", color='#ffff00', fontsize=10, fontweight='bold', ha='right')
         fig.text(0.01, 0.945, sector_info, color='#888888', fontsize=8.5)
 
-        # Bar Top Subpanel
+        # Bar Subpanel
         for i in range(len(df)):
             c, o = df['Close'].iloc[i], df['Open'].iloc[i]
             bar_color = color_neutral if abs(c - o) / max(1, o) < 0.0005 else (color_up if c >= o else color_down)
@@ -355,7 +357,7 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="IDX | RAF
         mm_colors = ['#ffff00' if v >= 0 else '#555555' for v in df['MM']]
         ax_mm.bar(x_indices, df['MM'], color=mm_colors, width=0.4)
 
-        # AXIS X (TANGGAL ATAU JAM SESUAI TIMEFRAME)
+        # AXIS X (Bawah)
         step = max(1, len(df) // 8)
         ticks = list(range(0, len(df), step))
         
@@ -377,7 +379,7 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="IDX | RAF
         plt.close('all')
 
 # ==========================================
-# SCANNER & BOT PROCESSOR
+# PROCESSOR REQUEST
 # ==========================================
 def process_chart_request(chat_id, stock_code, timeframe="1d"):
     timeframe = timeframe.lower().strip()
@@ -389,7 +391,8 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
     df = fetch_stock_history_multi_tf(stock_code, timeframe=timeframe)
     
     if df is not None and not df.empty and len(df) >= 5:
-        df['V1'] = df['Volume'].rolling(20, min_periods=1).mean()
+        # PENGHITUNGAN INDIKATOR UTAMA SEBELUM PENANGGILAN SIGNAL
+        df = apply_technical_indicators(df)
         df, buy_ratios = calculate_vsa_metrics(df)
         
         last_close = safe_int(df['Close'].iloc[-1])
@@ -414,7 +417,6 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
             output_filename=output_file
         )
         
-        # Caption Sesuai Format Persis
         caption = (
             f"*{stock_code.upper()}* — Harga `{last_close}` ({change_pct:+.2f}%)\n"
             f"    ├  Buy Strength Score: `{score}%` ({score_label})\n"
@@ -429,6 +431,5 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
     else:
         send_reply(chat_id, f"❌ Data historis untuk `{stock_code.upper()}` ({timeframe.upper()}) tidak ditemukan.")
 
-# Eksekusi Mandiri
 if __name__ == "__main__":
     process_chart_request(chat_id="12345678", stock_code="CARS", timeframe="5m")
