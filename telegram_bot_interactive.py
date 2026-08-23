@@ -34,6 +34,7 @@ logging.getLogger("urllib3").setLevel(logging.CRITICAL)
 # ==========================================
 # KONFIGURASI BOT TELEGRAM & API
 # ==========================================
+# GANTI DENGAN TOKEN DAN CHAT ID ANDA JIKA PERLU
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8833563003:AAGSx750u_QXWpr91sd3yuD6LcnMXtWWrxQ")
 TARGET_CHAT_ID = os.getenv("TARGET_CHAT_ID", "5660874676")
 
@@ -669,18 +670,22 @@ def auto_screener_loop():
 
             # Real-Time Spike Scanner
             if is_market_open():
+                # --- SCREENING DAILY (1D) AKTIF ---
                 signals_daily = run_scan_process_custom_tf(timeframe="1d")
                 filtered_daily = filter_signals_with_cooldown(signals_daily)
                 if filtered_daily:
                     broadcast_screening_results(filtered_daily, "🔥 REAL-TIME SIGNAL — DAILY (1D) BUY ACCUMULATION", "1d")
 
-                signals_5m = run_scan_process_custom_tf(timeframe="5m")
-                filtered_5m = filter_signals_with_cooldown(signals_5m)
-                if filtered_5m:
-                    broadcast_screening_results(filtered_5m, "⚡ REAL-TIME SIGNAL — INTRADAY (5M) ACCUMULATION", "5m")
+                # --- SCREENING 5M NON-AKTIF (DI-DISABLE DARI SINI) ---
+                # signals_5m = run_scan_process_custom_tf(timeframe="5m")
+                # filtered_5m = filter_signals_with_cooldown(signals_5m)
+                # if filtered_5m:
+                #     broadcast_screening_results(filtered_5m, "⚡ REAL-TIME SIGNAL — INTRADAY (5M) ACCUMULATION", "5m")
 
+                # Jeda scan real-time (5 menit)
                 time.sleep(300)
             else:
+                # Jeda saat pasar tutup
                 time.sleep(20)
 
         except Exception as e:
@@ -688,10 +693,11 @@ def auto_screener_loop():
             time.sleep(10)
 
 # ==========================================
-# PROCESS CHART REQUEST
+# PROCESS CHART REQUEST (FIXED & COMPLETED)
 # ==========================================
 def process_chart_request(chat_id, stock_code, timeframe="1d"):
     timeframe = timeframe.lower().strip()
+    # Normalisasi timeframe
     if timeframe in ['d', 'day', 'daily', '1d']: timeframe = '1d'
     if timeframe in ['5', '5mi', 'm5']: timeframe = '5m'
     if timeframe in ['15', '15mi', 'm15']: timeframe = '15m'
@@ -700,109 +706,101 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
     df = fetch_stock_history_multi_tf(stock_code, timeframe=timeframe)
     
     if df is not None and not df.empty and len(df) >= 5:
+        # Standarisasi nama kolom untuk chart generator
         column_mapping = {
             'date': 'Date', 'datetime': 'Date', 'time': 'Date', 't': 'Date',
             'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'
         }
         df.rename(columns=lambda x: column_mapping.get(str(x).lower().strip(), x), inplace=True)
-
-        for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
-            if col not in df.columns: 
-                df[col] = 0
-
-        if 'Date' in df.columns:
-            if not pd.api.types.is_datetime64_any_dtype(df['Date']):
-                df['Date'] = pd.to_datetime(df['Date'])
-            df.set_index('Date', inplace=True)
-        elif not isinstance(df.index, pd.DatetimeIndex):
-            df.index = pd.date_range(end=get_now_wib(), periods=len(df), freq='D' if timeframe == '1d' else '5min')
-
-        out_file = f"chart_{stock_code}_{timeframe}.png"
-        generate_pro_chart(df, symbol=stock_code, timeframe=timeframe, output_filename=out_file)
         
-        send_photo_reply(chat_id, out_file, caption=f"📊 *Chart {stock_code} ({timeframe.upper()})*")
+        # Hasilkan file chart
+        output_file = f"chart_{stock_code}_{timeframe}.png"
+        chart_file = generate_pro_chart(
+            df, 
+            symbol=stock_code.upper(), 
+            timeframe=timeframe, 
+            sector_info=f"IDX:{stock_code.upper()} | RAFANO TRADER ENGINE", 
+            output_filename=output_file
+        )
         
-        if os.path.exists(out_file):
-            os.remove(out_file)
+        # Kirim ke Telegram sebagai Foto
+        last_price = safe_int(df['Close'].iloc[-1])
+        caption = (
+            f"📈 *RAFANO TRADER SIGNAL CHART*\n"
+            f"📌 *Ticker:* `{stock_code.upper()}`\n"
+            f"⏱️ *Timeframe:* `{timeframe.upper()}`\n"
+            f"💰 *Last Price:* `{last_price}`"
+        )
+        send_photo_reply(chat_id, chart_file, caption=caption)
+        
+        # Hapus file setelah dikirim
+        if os.path.exists(chart_file):
+            os.remove(chart_file)
     else:
-        send_reply(chat_id, f"❌ Data saham `{stock_code}` tidak ditemukan / tidak aktif.")
+        send_reply(chat_id, f"❌ Data historis untuk `{stock_code.upper()}` ({timeframe.upper()}) tidak ditemukan.")
 
 # ==========================================
-# MAIN BOT TELEGRAM
+# TELEGRAM BOT POLLING ENGINE (FIXED)
 # ==========================================
-def main():
-    print("🚀 Starting RAFANO TRADER Bot...")
-    screener_thread = threading.Thread(target=auto_screener_loop, daemon=True)
-    screener_thread.start()
-
+def telegram_polling_loop():
+    print("🤖 Telegram Bot Engine Active & Listening...")
     last_update_id = 0
     while True:
         try:
-            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates?offset={last_update_id + 1}&timeout=30"
-            res = requests.get(url, timeout=35).json()
-
-            if res.get("ok") and res.get("result"):
-                for update in res["result"]:
+            # Menggunakan getUpdates untuk polling manual
+            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates?offset={last_update_id + 1}&timeout=20"
+            res = requests.get(url, timeout=25)
+            if res.status_code == 200:
+                data = res.json()
+                for update in data.get("result", []):
                     last_update_id = update["update_id"]
-
+                    
+                    # Handle Callback Query (tombol inline)
                     if "callback_query" in update:
                         cb = update["callback_query"]
-                        cb_id = cb["id"]
+                        chat_id = cb["message"]["chat"]["id"]
                         cb_data = cb.get("data", "")
-                        c_id = cb["message"]["chat"]["id"]
-
-                        try:
-                            requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery", json={"callback_query_id": cb_id})
-                        except Exception as e:
-                            print(f"⚠️ Callback answer error: {e}")
-
                         if cb_data.startswith("chart_"):
                             parts = cb_data.split("_")
                             if len(parts) >= 3:
                                 sym = parts[1]
                                 tf = parts[2]
-                                threading.Thread(target=process_chart_request, args=(c_id, sym, tf), daemon=True).start()
-
+                                threading.Thread(target=process_chart_request, args=(chat_id, sym, tf)).start()
+                                
+                    # Handle Direct Message Text
                     elif "message" in update and "text" in update["message"]:
                         msg = update["message"]
-                        c_id = msg["chat"]["id"]
+                        chat_id = msg["chat"]["id"]
                         text = msg["text"].strip()
-
-                        if text.lower() in ["/start", "/help"]:
-                            help_msg = (
-                                "🤖 *RAFANO TRADER BOT*\n\n"
-                                "Gunakan perintah berikut untuk meminta chart:\n"
-                                "• `/c <kode_saham> [timeframe]`\n"
-                                "  _Contoh:_ `/c ANTM` atau `/c BBRI 5m`\n\n"
-                                "Perintah Screener Manual:\n"
-                                "• `/scan` : Jalankan screener realtime 5M\n"
-                                "• `/scan 1d` : Jalankan screener Daily"
-                            )
-                            send_reply(c_id, help_msg)
-
-                        elif text.lower().startswith("/c ") or text.lower().startswith("/chart "):
+                        
+                        # Command /chart atau /c
+                        if text.lower().startswith("/chart") or text.lower().startswith("/c"):
                             parts = text.split()
                             if len(parts) >= 2:
                                 sym = parts[1].upper()
-                                tf = parts[2] if len(parts) >= 3 else "1d"
-                                threading.Thread(target=process_chart_request, args=(c_id, sym, tf), daemon=True).start()
+                                # Timeframe opsional, default 1d
+                                tf = parts[2].lower() if len(parts) >= 3 else "1d"
+                                threading.Thread(target=process_chart_request, args=(chat_id, sym, tf)).start()
                             else:
-                                send_reply(c_id, "⚠️ Format salah. Gunakan: `/c <kode_saham> [timeframe]`")
-
-                        elif text.lower().startswith("/scan"):
-                            parts = text.split()
-                            tf = parts[1] if len(parts) >= 2 else "5m"
-                            send_reply(c_id, f"🔍 *Memulai Screening Manual ({tf.upper()})... Mohon tunggu.*")
+                                send_reply(chat_id, "⚠️ *Format Salah!* Gunakan contoh: `/chart ANTM 1d` atau `/chart BBCA 5m`")
+                        
+                        # Jika user hanya mengetik kode saham (misal: ANTM)
+                        elif text.upper() in TOP_300_IHSG:
+                            threading.Thread(target=process_chart_request, args=(chat_id, text.upper(), "1d")).start()
                             
-                            def manual_scan_job(chat_target, scan_tf):
-                                sigs = run_scan_process_custom_tf(timeframe=scan_tf)
-                                broadcast_screening_results(sigs, f"MANUAL SCAN — {scan_tf.upper()}", scan_tf, target_chat_id=chat_target)
-                            
-                            threading.Thread(target=manual_scan_job, args=(c_id, tf), daemon=True).start()
+            time.sleep(0.2) # Jeda sedikit agar tidak spam CPU
 
         except Exception as e:
-            print(f"⚠️ Polling loop error: {e}")
-            time.sleep(3)
+            print(f"⚠️ Exception in Telegram Loop: {e}")
+            time.sleep(3) # Jeda lebih lama jika error API
 
+# ==========================================
+# ENTRY POINT
+# ==========================================
 if __name__ == "__main__":
-    main()
+    # Jalankan Auto-Screener di thread terpisah
+    t_screener = threading.Thread(target=auto_screener_loop, daemon=True)
+    t_screener.start()
+    
+    # Jalankan Telegram Bot Polling di thread utama
+    telegram_polling_loop()
