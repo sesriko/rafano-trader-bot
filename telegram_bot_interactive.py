@@ -9,7 +9,8 @@ from datetime import datetime
 # ==========================================
 # KONFIGURASI BOT & VARIABEL GLOBAL
 # ==========================================
-TELEGRAM_BOT_TOKEN = "7262423146:AAEzC7W2485kUvD53G-m5L2sF5bM_kQ6T8s"
+TELEGRAM_BOT_TOKEN = ("8833563003:AAGSx750u_QXWpr91sd3yuD6LcnMXtWWrxQ")
+TARGET_CHAT_ID = os.getenv("TARGET_CHAT_ID", "5660874676")
 
 def get_now_wib():
     return datetime.now()
