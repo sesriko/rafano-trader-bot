@@ -9,10 +9,9 @@ from datetime import datetime
 # ==========================================
 # KONFIGURASI BOT & VARIABEL GLOBAL
 # ==========================================
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
+TELEGRAM_BOT_TOKEN = "7262423146:AAEzC7W2485kUvD53G-m5L2sF5bM_kQ6T8s"
 
 def get_now_wib():
-    # Mengembalikan waktu saat ini (disesuaikan jika menggunakan zona waktu tertentu)
     return datetime.now()
 
 def safe_int(val):
@@ -56,7 +55,7 @@ def send_photo_reply(chat_id, photo_path, caption=""):
         print(f"⚠️ Error sending photo: {e}")
 
 # ==========================================
-# FUNGSI INDIKATOR TEKNIKAL & MOCK/DATA FETCH
+# FUNGSI INDIKATOR TEKNIKAL & DATA FETCH
 # ==========================================
 def calculate_rsi(series, period=14):
     delta = series.diff()
@@ -66,7 +65,6 @@ def calculate_rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 def calculate_adx(df, period=14):
-    # Perhitungan sederhana ADX untuk kebutuhan caption
     try:
         plus_dm = df['High'].diff().clip(lower=0)
         minus_dm = (-df['Low'].diff()).clip(lower=0)
@@ -89,7 +87,6 @@ def calculate_vsa_metrics(df):
         return df, {}
 
 def fetch_stock_history_multi_tf(stock_code, timeframe="1d"):
-    # Fungsi placeholder untuk mengambil data historis saham (sesuaikan dengan sumber data Anda, misal yfinance/api broker)
     try:
         dates = pd.date_range(end=get_now_wib(), periods=100, freq='D')
         data = {
@@ -106,7 +103,6 @@ def fetch_stock_history_multi_tf(stock_code, timeframe="1d"):
         return None
 
 def generate_pro_chart(df, symbol, timeframe, output_filename):
-    # Fungsi placeholder untuk membuat gambar chart (matplotlib/mplfinance)
     try:
         import matplotlib.pyplot as plt
         plt.figure(figsize=(10, 5))
@@ -116,7 +112,6 @@ def generate_pro_chart(df, symbol, timeframe, output_filename):
         plt.savefig(output_filename)
         plt.close()
     except Exception as e:
-        # Fallback file kosong jika matplotlib belum terkonfigurasi penuh
         with open(output_filename, 'wb') as f:
             f.write(b'\x89PNG\r\n\x1a\n')
 
@@ -148,7 +143,7 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
         elif not isinstance(df.index, pd.DatetimeIndex):
             df.index = pd.date_range(end=get_now_wib(), periods=len(df), freq='D')
 
-        # Indikator Utama (EMA 50 sesuai instruksi & preferensi Anda)
+        # Indikator Utama (EMA 50)
         df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
         df['RSI14'] = calculate_rsi(df['Close'], period=14)
         df['ADX14'] = calculate_adx(df, period=14)
@@ -157,7 +152,6 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
         df['V1'] = df['Volume'].rolling(20, min_periods=1).mean()
         df, buy_ratios = calculate_vsa_metrics(df)
 
-        # Ambil data baris terakhir
         last_row = df.iloc[-1]
         last_close = last_row['Close']
         last_vol = last_row['Volume']
@@ -187,11 +181,9 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
         net_5d_vol = df['Net_Vol_VSA'].tail(5).sum()
         bandar_status = "🟢 AKUMULASI" if net_5d_vol > 0 else "🔴 DISTRIBUSI"
 
-        # Buat File Chart Gambar
         out_file = f"chart_{stock_code}_{timeframe}.png"
         generate_pro_chart(df, symbol=stock_code, timeframe=timeframe, output_filename=out_file)
         
-        # Susun Format Caption Informasi di Bawah Foto
         caption_text = (
             f"📊 *ANALISIS TEKNIKAL: {stock_code} ({timeframe.upper()})*\n"
             f"────────────────────────────────────────\n"
@@ -217,11 +209,9 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
 # ==========================================
 def auto_screener_loop():
     while True:
-        # Loop screener otomatis di background (jika ada)
         time.sleep(60)
 
 def run_scan_process_custom_tf(timeframe="5m"):
-    # Fungsi dummy proses screener
     return []
 
 def broadcast_screening_results(signals, title, timeframe, target_chat_id=None):
