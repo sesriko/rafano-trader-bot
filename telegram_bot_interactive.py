@@ -113,7 +113,7 @@ TOP_300_IHSG = [
 ]
 
 # ==========================================
-# HELPER FRAKSI HARGA IHSG & FORMATTING
+# HELPER FRAKSI HARGA IHSG & DETEKSI JAM BURSA
 # ==========================================
 def round_to_ihsg_fraction(price):
     if pd.isna(price) or price <= 0:
@@ -154,17 +154,24 @@ def format_large_number(val, show_sign=False):
         return f"{sign}{val:,.0f}"
 
 def is_market_open():
+    """
+    Validasi Sesi Perdagangan IHSG:
+    - Sabtu & Minggu -> PAUSE
+    - Hari Biasa di Luar Jam Sesi 1 & Sesi 2 -> PAUSE
+    """
     now = get_now_wib()
     weekday = now.weekday()
-    if weekday >= 5: # Sabtu & Minggu libur
+    if weekday >= 5: # Sabtu (5) & Minggu (6) bursa tutup
         return False
+        
     current_time = now.time()
-    if weekday == 4: # Jumat
+    if weekday == 4: # Hari Jumat
         session1_start, session1_end = datetime.time(9, 0), datetime.time(11, 30)
         session2_start, session2_end = datetime.time(14, 0), datetime.time(15, 50)
-    else: # Senin - Kamis
+    else: # Senin s/d Kamis
         session1_start, session1_end = datetime.time(9, 0), datetime.time(12, 0)
         session2_start, session2_end = datetime.time(13, 30), datetime.time(15, 50)
+        
     return (session1_start <= current_time <= session1_end) or (session2_start <= current_time <= session2_end)
 
 # ==========================================
@@ -290,7 +297,7 @@ def check_volume_spike_signal(df, symbol, threshold_multiplier=2.0, min_value_tr
     return False, {}
 
 # ==========================================
-# CHART GENERATOR (300 DPI & RAPAT KIRI)
+# CHART GENERATOR (PERBAIKAN MARGIN KIRI LUAR)
 # ==========================================
 def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industrial Sector | IHSG", output_filename="chart_output.png"):
     try:
@@ -427,13 +434,15 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
         min_low = df['Low'].min()
         ax_main.set_ylim(min_low * 0.95, max_high * 1.25)
         
-        # PERBAIKAN: Mengurangi margin kosong di batas kiri (dikurangi dari -4 ke -1)
-        ax_main.set_xlim(-1, len(df) + 1)
+        # =========================================================================
+        # PERBAIKAN UTAMA: BATAS SUMBU X (MERAPATKAN BAGIAN KIRI LUAR CHART)
+        # Menghapus padding kosong di sebelah kiri (index 0) agar grafik langsung mepet
+        # =========================================================================
+        ax_main.set_xlim(-0.5, len(df) - 0.5)
 
-        # DASHBOARD OVERLAY (RAPAT KIRI & COMPACT)
+        # DASHBOARD OVERLAY (COMPACT & PAS)
         status_color = "#00ff00" if latest_setup["status"] == "BUY ACCUMULATION" else "#ffff00"
         
-        # PERBAIKAN: Hilangkan spasi berlebih agar tabel tidak terlalu longgar
         entry_val = latest_setup['entry'] if latest_setup['entry'] > 0 else last_close
         tp1_val = latest_setup['tp1'] if latest_setup['tp1'] > 0 else round_to_ihsg_fraction(last_close*1.035)
         tp2_val = latest_setup['tp2'] if latest_setup['tp2'] > 0 else round_to_ihsg_fraction(last_close*1.07)
@@ -481,7 +490,7 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
 
         # HEADER CHART
         fig.text(0.01, 0.975, f"{symbol}", color='#ffffff', fontsize=16, fontweight='bold')
-        fig.text(0.45, 0.975, "RAFANO TRADER", color='#ffffff', fontsize=35, fontweight='bold')
+        fig.text(0.45, 0.975, "RAFANO TRADER", color='#ffffff', fontsize=15, fontweight='bold')
         
         last_date_str = get_now_wib().strftime('%d %b %Y')
         fig.text(0.88, 0.975, f"{tf_clean.upper()} {last_date_str}", color='#ffff00', fontsize=10, fontweight='bold', ha='right')
@@ -530,7 +539,7 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
             output_filename, 
             dpi=300, 
             bbox_inches='tight', 
-            pad_inches=0.1,
+            pad_inches=0.05,
             facecolor=fig.get_facecolor(),
             format='png'
         )
@@ -688,7 +697,7 @@ def broadcast_screening_results(signals, title_header, tf_code, target_chat_id=N
         send_reply(target_chat_id, current_msg, reply_markup={"inline_keyboard": inline_keyboard})
 
 # ==========================================
-# MANUAL CHART REQUEST HANDLER
+# HANDLER PERINTAH PANGGIL CHART BOT (/c)
 # ==========================================
 def process_chart_request(chat_id, stock_code, timeframe="1d"):
     timeframe = timeframe.lower().strip()
@@ -735,10 +744,10 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
             
             caption_msg = (
                 f"{stock_code.upper()} — Harga {last_close} ({change_pct:+.2f}%)\n"
-                f"     Buy Strength Score: {score}% ({score_label})\n"
-                f"     RSI (14): {last_rsi}\n"
-                f"     Vol Spike: {vol_multiple:.1f}x V1 | Buy Vol: {buy_ratio_pct}%\n"
-                f"     Bandar 1W: {bandar_val_str} ({bandar_status})"
+                f"    ├  Buy Strength Score: {score}% ({score_label})\n"
+                f"    ├  RSI (14): {last_rsi}\n"
+                f"    ├ Vol Spike: {vol_multiple:.1f}x V1 | Buy Vol: {buy_ratio_pct}%\n"
+                f"    └ Bandar 1W: {bandar_val_str} ({bandar_status})"
             )
             
             send_photo_reply(chat_id, file_path, caption=caption_msg)
@@ -751,10 +760,10 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
         send_reply(chat_id, f"⚠️ *Data historis tidak ditemukan untuk emiten {stock_code.upper()}*")
 
 # ==========================================
-# AUTO SCREENER LOOP (JAM MARKET AKTIF ONLY)
+# AUTO SCREENER LOOP (DENGAN REVISI BURSA TUTUP)
 # ==========================================
 def auto_screener_loop():
-    print("🚀 Auto Scheduled Screener Engine Active (Active Market Hours Only)...")
+    print("🚀 Auto Scheduled Screener Engine Active...")
     global SCREENER_ACTIVE
     last_triggered_sesi1, last_triggered_eod = "", ""
     
@@ -764,6 +773,11 @@ def auto_screener_loop():
                 time.sleep(10)
                 continue
 
+            # =========================================================================
+            # REVISI: PENGECEKAN KEAKTIFAN BURSA
+            # Jika bursa tutup (Sabtu, Minggu, atau di luar jam 09.00-15.50 WIB)
+            # Autoscreener akan terhenti otomatis & menunggu 5 menit sebelum cek lagi.
+            # =========================================================================
             if is_market_open():
                 now = get_now_wib()
                 today_str, current_time_str = now.strftime('%Y-%m-%d'), now.strftime('%H:%M')
@@ -790,6 +804,7 @@ def auto_screener_loop():
 
                 time.sleep(600)
             else:
+                # Bursa Tutup -> Tahan/Pause Autoscreener selama 300 detik (5 menit)
                 time.sleep(300)
 
         except Exception as e:
@@ -843,7 +858,7 @@ def telegram_bot_listener():
                                 "🔍 `/scan`\n"
                                 "  Menjalankan manual Instant Screener (1D).\n\n"
                                 "========================================\n"
-                                "⏱️ *Auto Screener:* Berjalan otomatis hanya saat jam bursa aktif."
+                                "⏱️ *Auto Screener:* Otomatis STANBY saat bursa libur/tutup."
                             )
                             send_reply(chat_id, help_msg)
 
@@ -871,7 +886,7 @@ def telegram_bot_listener():
 # ==========================================
 if __name__ == "__main__":
     print("==========================================")
-    print("🔥 RAFANO TRADER ENGINE STARTING...")
+    print("🔥 RAFANO TRADER BOT ENGINE STARTING...")
     print("==========================================")
     
     threading.Thread(target=auto_screener_loop, daemon=True).start()
