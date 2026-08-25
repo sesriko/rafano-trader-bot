@@ -156,7 +156,7 @@ def format_large_number(val, show_sign=False):
 def is_market_open():
     now = get_now_wib()
     weekday = now.weekday()
-    if weekday >= 5:
+    if weekday >= 5: # Sabtu & Minggu libur
         return False
     current_time = now.time()
     if weekday == 4: # Jumat
@@ -201,12 +201,9 @@ def calculate_vsa_metrics(df):
     )
     buy_ratio = np.clip(buy_ratio, 0.05, 0.95)
     
-    # Volume VSA
     df['Vol_Buy'] = df['Volume'] * buy_ratio
     df['Vol_Sell'] = df['Volume'] - df['Vol_Buy']
     df['Net_Vol_VSA'] = df['Vol_Buy'] - df['Vol_Sell']
-    
-    # Value VSA (Nominal Rupiah)
     df['Net_Val_VSA'] = df['Net_Vol_VSA'] * df['Close']
     return df, buy_ratio
 
@@ -273,7 +270,6 @@ def check_volume_spike_signal(df, symbol, threshold_multiplier=2.0, min_value_tr
     net_5d_val = df['Net_Val_VSA'].tail(5).sum()
     is_bandar_accum = net_5d_val > 0
 
-    # SYARAT FILTER DIPERKETAT
     if (last_close > ema_50) and \
        (last_rsi <= 75) and \
        (last_vol >= (avg_vol_v1 * threshold_multiplier)) and \
@@ -294,7 +290,7 @@ def check_volume_spike_signal(df, symbol, threshold_multiplier=2.0, min_value_tr
     return False, {}
 
 # ==========================================
-# CHART GENERATOR (300 DPI & MULTI-EMA)
+# CHART GENERATOR (300 DPI & PROPORTIONAL EMA)
 # ==========================================
 def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industrial Sector | IHSG", output_filename="chart_output.png"):
     try:
@@ -327,7 +323,7 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
         last_low = df['Low'].iloc[-1]
         last_vol = df['Volume'].iloc[-1]
 
-        # MULTI EMA: Garis makin tinggi span, makin tebal
+        # MULTI EMA (Disesuaikan agar tidak menutupi candle)
         df['EMA8'] = df['Close'].ewm(span=8, adjust=False).mean()
         df['EMA21'] = df['Close'].ewm(span=21, adjust=False).mean()
         df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
@@ -387,11 +383,11 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
                 rect = patches.Rectangle((i - 0.35, body_bottom), 0.7, body_height, linewidth=1.2, edgecolor=color_down, facecolor=color_down)
                 ax_main.add_patch(rect)
 
-        # PLOT EMA (Ketebalan Bertingkat)
+        # PLOT EMA (KETEBALAN DISESUAIKAN)
         ax_main.plot(x_indices, df['EMA8'], color='#00ffff', linewidth=1.0, label='EMA 8')
-        ax_main.plot(x_indices, df['EMA21'], color='#ff00ff', linewidth=1.6, label='EMA 21')
-        ax_main.plot(x_indices, df['EMA50'], color='#ffff00', linewidth=2.2, label='EMA 50')
-        ax_main.plot(x_indices, df['EMA125'], color='#ffffff', linewidth=3.0, label='EMA 125')
+        ax_main.plot(x_indices, df['EMA21'], color='#ff00ff', linewidth=1.2, label='EMA 21')
+        ax_main.plot(x_indices, df['EMA50'], color='#ffff00', linewidth=1.5, label='EMA 50')
+        ax_main.plot(x_indices, df['EMA125'], color='#ffffff', linewidth=1.8, label='EMA 125')
 
         ax_main.step(x_indices, df['Pivot_High'], where='mid', color='#555555', linestyle='--', linewidth=1.0)
         ax_main.step(x_indices, df['Pivot_Low'], where='mid', color='#444444', linestyle=':', linewidth=1.0)
@@ -520,7 +516,7 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
         plt.setp(ax_main.get_xticklabels(), visible=False)
         plt.setp(ax_vol.get_xticklabels(), visible=False)
 
-        # RENDER WITH HIGH DPI (300 DPI)
+        # RENDER DENGAN 300 DPI
         plt.savefig(
             output_filename, 
             dpi=300, 
@@ -683,7 +679,7 @@ def broadcast_screening_results(signals, title_header, tf_code, target_chat_id=N
         send_reply(target_chat_id, current_msg, reply_markup={"inline_keyboard": inline_keyboard})
 
 # ==========================================
-# MANUAL CHART REQUEST HANDLER (DETAIL CAPTION)
+# MANUAL CHART REQUEST HANDLER
 # ==========================================
 def process_chart_request(chat_id, stock_code, timeframe="1d"):
     timeframe = timeframe.lower().strip()
@@ -698,7 +694,6 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
         col_map = {'open':'Open', 'high':'High', 'low':'Low', 'close':'Close', 'volume':'Volume'}
         df.rename(columns=lambda x: col_map.get(str(x).lower().strip(), x), inplace=True)
         
-        # Hitung Ulang Metrik VSA & Indikator untuk Caption
         df['V1'] = df['Volume'].rolling(20, min_periods=1).mean()
         df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
         df['RSI14'] = calculate_rsi(df['Close'], period=14)
@@ -729,7 +724,6 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
                 output_filename=chart_file
             )
             
-            # CAPTION PERSIS SESUAI INSTRUKSI
             caption_msg = (
                 f"{stock_code.upper()} — Harga {last_close} ({change_pct:+.2f}%)\n"
                 f"    ├  Buy Strength Score: {score}% ({score_label})\n"
@@ -761,7 +755,7 @@ def auto_screener_loop():
                 time.sleep(10)
                 continue
 
-            # SCREENER HANYA BERJALAN SAAT MARKET AKTIF
+            # SCREENER HANYA BERJALAN SAAT JAM BURSA AKTIF
             if is_market_open():
                 now = get_now_wib()
                 today_str, current_time_str = now.strftime('%Y-%m-%d'), now.strftime('%H:%M')
@@ -786,9 +780,10 @@ def auto_screener_loop():
                 if filtered_daily:
                     broadcast_screening_results(filtered_daily, "REAL-TIME SIGNAL — DAILY (1D) BUY ACCUMULATION", "1d")
 
-                time.sleep(600)
+                time.sleep(600) # Jeda 10 menit antar-scan saat market aktif
             else:
-                time.sleep(30)
+                # Saat bursa tutup, bot standby (tidur 5 menit) tanpa melakukan scan
+                time.sleep(300)
 
         except Exception as e:
             print(f"⚠️ Exception in Auto-Screener: {e}")
@@ -841,7 +836,7 @@ def telegram_bot_listener():
                                 "🔍 `/scan`\n"
                                 "  Menjalankan manual Instant Screener (1D).\n\n"
                                 "========================================\n"
-                                "⏱️ *Auto Screener:* Berjalan otomatis saat jam bursa aktif."
+                                "⏱️ *Auto Screener:* Berjalan otomatis hanya saat jam bursa aktif."
                             )
                             send_reply(chat_id, help_msg)
 
