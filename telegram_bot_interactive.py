@@ -290,7 +290,7 @@ def check_volume_spike_signal(df, symbol, threshold_multiplier=2.0, min_value_tr
     return False, {}
 
 # ==========================================
-# CHART GENERATOR (300 DPI & PROPORTIONAL EMA)
+# CHART GENERATOR (300 DPI & RAPAT KIRI)
 # ==========================================
 def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industrial Sector | IHSG", output_filename="chart_output.png"):
     try:
@@ -323,7 +323,7 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
         last_low = df['Low'].iloc[-1]
         last_vol = df['Volume'].iloc[-1]
 
-        # MULTI EMA (Disesuaikan agar tidak menutupi candle)
+        # MULTI EMA
         df['EMA8'] = df['Close'].ewm(span=8, adjust=False).mean()
         df['EMA21'] = df['Close'].ewm(span=21, adjust=False).mean()
         df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
@@ -383,7 +383,7 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
                 rect = patches.Rectangle((i - 0.35, body_bottom), 0.7, body_height, linewidth=1.2, edgecolor=color_down, facecolor=color_down)
                 ax_main.add_patch(rect)
 
-        # PLOT EMA (KETEBALAN DISESUAIKAN)
+        # PLOT EMA
         ax_main.plot(x_indices, df['EMA8'], color='#00ffff', linewidth=1.0, label='EMA 8')
         ax_main.plot(x_indices, df['EMA21'], color='#ff00ff', linewidth=1.2, label='EMA 21')
         ax_main.plot(x_indices, df['EMA50'], color='#ffff00', linewidth=1.5, label='EMA 50')
@@ -426,27 +426,36 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
         max_high = df['High'].max()
         min_low = df['Low'].min()
         ax_main.set_ylim(min_low * 0.95, max_high * 1.25)
-        ax_main.set_xlim(-4, len(df) + 2)
+        
+        # PERBAIKAN: Mengurangi margin kosong di batas kiri (dikurangi dari -4 ke -1)
+        ax_main.set_xlim(-1, len(df) + 1)
 
-        # DASHBOARD OVERLAY
+        # DASHBOARD OVERLAY (RAPAT KIRI & COMPACT)
         status_color = "#00ff00" if latest_setup["status"] == "BUY ACCUMULATION" else "#ffff00"
+        
+        # PERBAIKAN: Hilangkan spasi berlebih agar tabel tidak terlalu longgar
+        entry_val = latest_setup['entry'] if latest_setup['entry'] > 0 else last_close
+        tp1_val = latest_setup['tp1'] if latest_setup['tp1'] > 0 else round_to_ihsg_fraction(last_close*1.035)
+        tp2_val = latest_setup['tp2'] if latest_setup['tp2'] > 0 else round_to_ihsg_fraction(last_close*1.07)
+        sl_val = latest_setup['danger'] if latest_setup['danger'] > 0 else round_to_ihsg_fraction(last_close*0.95)
+
         dashboard_text = (
-            f" 📊 RAFANO TRADER DASHBOARD\n"
-            f" -------------------------\n"
-            f" O: {safe_int(last_open)}  H: {safe_int(last_high)}  L: {safe_int(last_low)}  C: {safe_int(last_close)}\n"
-            f" VOL: {format_large_number(last_vol)}\n"
-            f" -------------------------\n"
-            f" SCORE : {signal_score}% ({score_lbl})\n"
-            f" STATUS: {latest_setup['status']}\n"
-            f" ENTRY : {latest_setup['entry'] if latest_setup['entry'] > 0 else last_close}\n"
-            f" TP1    : {latest_setup['tp1'] if latest_setup['tp1'] > 0 else round_to_ihsg_fraction(last_close*1.035)}\n"
-            f" TP2    : {latest_setup['tp2'] if latest_setup['tp2'] > 0 else round_to_ihsg_fraction(last_close*1.07)}\n"
-            f" SL     : {latest_setup['danger'] if latest_setup['danger'] > 0 else round_to_ihsg_fraction(last_close*0.95)}"
+            f"RAFANO DASHBOARD\n"
+            f"-----------------------\n"
+            f"O:{safe_int(last_open)} H:{safe_int(last_high)} L:{safe_int(last_low)} C:{safe_int(last_close)}\n"
+            f"VOL: {format_large_number(last_vol)}\n"
+            f"-----------------------\n"
+            f"SCORE  : {signal_score}% ({score_lbl})\n"
+            f"STATUS : {latest_setup['status']}\n"
+            f"ENTRY  : {entry_val}\n"
+            f"TP1    : {tp1_val}\n"
+            f"TP2    : {tp2_val}\n"
+            f"SL     : {sl_val}"
         )
         
-        ax_main.text(0.015, 0.96, dashboard_text, transform=ax_main.transAxes, verticalalignment='top', horizontalalignment='left',
+        ax_main.text(0.01, 0.96, dashboard_text, transform=ax_main.transAxes, verticalalignment='top', horizontalalignment='left',
                      fontfamily='monospace', fontsize=8.5, color=status_color,
-                     bbox=dict(boxstyle='round,pad=0.4', facecolor='#000000', alpha=0.70, edgecolor='#333333'))
+                     bbox=dict(boxstyle='round,pad=0.3', facecolor='#000000', alpha=0.75, edgecolor='#333333'))
 
         stat_text_right = (
             f"RSI (14)   : {last_rsi}\n"
@@ -456,7 +465,7 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
         )
         ax_main.text(0.985, 0.96, stat_text_right, transform=ax_main.transAxes, verticalalignment='top', horizontalalignment='right',
                      fontfamily='monospace', fontsize=8.5, color='#00ffff',
-                     bbox=dict(boxstyle='round,pad=0.4', facecolor='#000000', alpha=0.70, edgecolor='#333333'))
+                     bbox=dict(boxstyle='round,pad=0.3', facecolor='#000000', alpha=0.75, edgecolor='#333333'))
 
         latest_ph, latest_pl = df['Pivot_High'].iloc[-1], df['Pivot_Low'].iloc[-1]
         
@@ -472,7 +481,7 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
 
         # HEADER CHART
         fig.text(0.01, 0.975, f"{symbol}", color='#ffffff', fontsize=16, fontweight='bold')
-        fig.text(0.45, 0.975, "RAFANO TRADER", color='#ffffff', fontsize=15, fontweight='bold')
+        fig.text(0.45, 0.975, "RAFANO TRADER", color='#ffffff', fontsize=35, fontweight='bold')
         
         last_date_str = get_now_wib().strftime('%d %b %Y')
         fig.text(0.88, 0.975, f"{tf_clean.upper()} {last_date_str}", color='#ffff00', fontsize=10, fontweight='bold', ha='right')
@@ -726,10 +735,10 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
             
             caption_msg = (
                 f"{stock_code.upper()} — Harga {last_close} ({change_pct:+.2f}%)\n"
-                f"    ├  Buy Strength Score: {score}% ({score_label})\n"
-                f"    ├  RSI (14): {last_rsi}\n"
-                f"    ├ Vol Spike: {vol_multiple:.1f}x V1 | Buy Vol: {buy_ratio_pct}%\n"
-                f"    └ Bandar 1W: {bandar_val_str} ({bandar_status})"
+                f"     Buy Strength Score: {score}% ({score_label})\n"
+                f"     RSI (14): {last_rsi}\n"
+                f"     Vol Spike: {vol_multiple:.1f}x V1 | Buy Vol: {buy_ratio_pct}%\n"
+                f"     Bandar 1W: {bandar_val_str} ({bandar_status})"
             )
             
             send_photo_reply(chat_id, file_path, caption=caption_msg)
@@ -755,7 +764,6 @@ def auto_screener_loop():
                 time.sleep(10)
                 continue
 
-            # SCREENER HANYA BERJALAN SAAT JAM BURSA AKTIF
             if is_market_open():
                 now = get_now_wib()
                 today_str, current_time_str = now.strftime('%Y-%m-%d'), now.strftime('%H:%M')
@@ -780,9 +788,8 @@ def auto_screener_loop():
                 if filtered_daily:
                     broadcast_screening_results(filtered_daily, "REAL-TIME SIGNAL — DAILY (1D) BUY ACCUMULATION", "1d")
 
-                time.sleep(600) # Jeda 10 menit antar-scan saat market aktif
+                time.sleep(600)
             else:
-                # Saat bursa tutup, bot standby (tidur 5 menit) tanpa melakukan scan
                 time.sleep(300)
 
         except Exception as e:
