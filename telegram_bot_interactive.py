@@ -391,10 +391,10 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
                 ax_main.add_patch(rect)
 
         # PLOT EMA
-        ax_main.plot(x_indices, df['EMA8'], color='#00ffff', linewidth=1.0, label='EMA 8')
-        ax_main.plot(x_indices, df['EMA21'], color='#ff00ff', linewidth=1.2, label='EMA 21')
-        ax_main.plot(x_indices, df['EMA50'], color='#ffff00', linewidth=1.5, label='EMA 50')
-        ax_main.plot(x_indices, df['EMA125'], color='#ffffff', linewidth=1.8, label='EMA 125')
+        ax_main.plot(x_indices, df['EMA8'], color='#00ffff', linewidth=0.8, label='EMA 8')
+        ax_main.plot(x_indices, df['EMA21'], color='#ff00ff', linewidth=1, label='EMA 21')
+        ax_main.plot(x_indices, df['EMA50'], color='#ffff00', linewidth=1.2, label='EMA 50')
+        ax_main.plot(x_indices, df['EMA125'], color='#ffffff', linewidth=1.3, label='EMA 125')
 
         ax_main.step(x_indices, df['Pivot_High'], where='mid', color='#555555', linestyle='--', linewidth=1.0)
         ax_main.step(x_indices, df['Pivot_Low'], where='mid', color='#444444', linestyle=':', linewidth=1.0)
@@ -438,7 +438,7 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
         # PERBAIKAN UTAMA: BATAS SUMBU X (MERAPATKAN BAGIAN KIRI LUAR CHART)
         # Menghapus padding kosong di sebelah kiri (index 0) agar grafik langsung mepet
         # =========================================================================
-        ax_main.set_xlim(-0.5, len(df) - 0.5)
+        ax_main.set_xlim(-0.1, len(df) - 0.2)
 
         # DASHBOARD OVERLAY (COMPACT & PAS)
         status_color = "#00ff00" if latest_setup["status"] == "BUY ACCUMULATION" else "#ffff00"
