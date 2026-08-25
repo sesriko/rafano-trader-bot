@@ -154,11 +154,7 @@ def format_large_number(val, show_sign=False):
         return f"{sign}{val:,.0f}"
 
 def is_market_open():
-    """
-    Validasi Sesi Perdagangan IHSG:
-    - Sabtu & Minggu -> PAUSE
-    - Hari Biasa di Luar Jam Sesi 1 & Sesi 2 -> PAUSE
-    """
+    """Validasi Sesi Perdagangan IHSG"""
     now = get_now_wib()
     weekday = now.weekday()
     if weekday >= 5: # Sabtu (5) & Minggu (6) bursa tutup
@@ -297,9 +293,9 @@ def check_volume_spike_signal(df, symbol, threshold_multiplier=2.0, min_value_tr
     return False, {}
 
 # ==========================================
-# CHART GENERATOR (PERBAIKAN MARGIN KIRI LUAR)
+# CHART GENERATOR (REVISI MARGIN KIRI & UKURAN EMA)
 # ==========================================
-def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industrial Sector | IHSG", output_filename="chart_output.png"):
+def generate_pro_chart(df, symbol="MHKI", timeframe="5m", sector_info="MHKI | IHSG", output_filename="chart_output.png"):
     try:
         tf_clean = timeframe.lower().strip()
         is_intraday = tf_clean in ['1m', '5m', '15m', '30m', '1h']
@@ -330,7 +326,7 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
         last_low = df['Low'].iloc[-1]
         last_vol = df['Volume'].iloc[-1]
 
-        # MULTI EMA
+        # MULTI EMA CALCULATIONS
         df['EMA8'] = df['Close'].ewm(span=8, adjust=False).mean()
         df['EMA21'] = df['Close'].ewm(span=21, adjust=False).mean()
         df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
@@ -356,12 +352,18 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
         plt.style.use('dark_background')
         
         fig = plt.figure(figsize=(18, 10), dpi=300, facecolor='#000000')
-        gs = gridspec.GridSpec(4, 1, height_ratios=[4, 0.2, 1.2, 0.8], hspace=0.04)
+        gs = gridspec.GridSpec(4, 1, height_ratios=[4, 0.25, 1.2, 0.8], hspace=0.04)
 
         ax_main = fig.add_subplot(gs[0])
         ax_bar = fig.add_subplot(gs[1], sharex=ax_main)
         ax_vol = fig.add_subplot(gs[2], sharex=ax_main)
         ax_mm = fig.add_subplot(gs[3], sharex=ax_main)
+
+        # =========================================================================
+        # REVISI 1: PENYESUAIAN MARGIN KIRI TERLUAR UNTUK MENYELARASKAN AKSI SEBELAH KIRI
+        # Mengunci alignment subplots agar axis kiri sejajar sempurna & simetris
+        # =========================================================================
+        fig.subplots_adjust(left=0.065, right=0.93, top=0.94, bottom=0.06)
 
         color_up, color_down, color_neutral = '#00ff00', '#ff0000', '#888888'
 
@@ -390,10 +392,16 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
                 rect = patches.Rectangle((i - 0.35, body_bottom), 0.7, body_height, linewidth=1.2, edgecolor=color_down, facecolor=color_down)
                 ax_main.add_patch(rect)
 
-        # PLOT EMA
+        # =========================================================================
+        # REVISI 2: UKURAN KETEBALAN GARIS EMA
+        # EMA 8  : 0.8
+        # EMA 21 : 1.0
+        # EMA 50 : 1.1
+        # EMA 125: 1.3
+        # =========================================================================
         ax_main.plot(x_indices, df['EMA8'], color='#00ffff', linewidth=0.8, label='EMA 8')
-        ax_main.plot(x_indices, df['EMA21'], color='#ff00ff', linewidth=1, label='EMA 21')
-        ax_main.plot(x_indices, df['EMA50'], color='#ffff00', linewidth=1.2, label='EMA 50')
+        ax_main.plot(x_indices, df['EMA21'], color='#ff00ff', linewidth=1.0, label='EMA 21')
+        ax_main.plot(x_indices, df['EMA50'], color='#ffff00', linewidth=1.1, label='EMA 50')
         ax_main.plot(x_indices, df['EMA125'], color='#ffffff', linewidth=1.3, label='EMA 125')
 
         ax_main.step(x_indices, df['Pivot_High'], where='mid', color='#555555', linestyle='--', linewidth=1.0)
@@ -433,14 +441,9 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
         max_high = df['High'].max()
         min_low = df['Low'].min()
         ax_main.set_ylim(min_low * 0.95, max_high * 1.25)
-        
-        # =========================================================================
-        # PERBAIKAN UTAMA: BATAS SUMBU X (MERAPATKAN BAGIAN KIRI LUAR CHART)
-        # Menghapus padding kosong di sebelah kiri (index 0) agar grafik langsung mepet
-        # =========================================================================
-        ax_main.set_xlim(-0.1, len(df) - 0.2)
+        ax_main.set_xlim(-0.5, len(df) - 0.5)
 
-        # DASHBOARD OVERLAY (COMPACT & PAS)
+        # DASHBOARD OVERLAY (COMPACT SISI KIRI)
         status_color = "#00ff00" if latest_setup["status"] == "BUY ACCUMULATION" else "#ffff00"
         
         entry_val = latest_setup['entry'] if latest_setup['entry'] > 0 else last_close
@@ -534,7 +537,6 @@ def generate_pro_chart(df, symbol="ANTM", timeframe="1d", sector_info="Industria
         plt.setp(ax_main.get_xticklabels(), visible=False)
         plt.setp(ax_vol.get_xticklabels(), visible=False)
 
-        # RENDER DENGAN 300 DPI
         plt.savefig(
             output_filename, 
             dpi=300, 
@@ -760,7 +762,7 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
         send_reply(chat_id, f"⚠️ *Data historis tidak ditemukan untuk emiten {stock_code.upper()}*")
 
 # ==========================================
-# AUTO SCREENER LOOP (DENGAN REVISI BURSA TUTUP)
+# AUTO SCREENER LOOP
 # ==========================================
 def auto_screener_loop():
     print("🚀 Auto Scheduled Screener Engine Active...")
@@ -773,11 +775,6 @@ def auto_screener_loop():
                 time.sleep(10)
                 continue
 
-            # =========================================================================
-            # REVISI: PENGECEKAN KEAKTIFAN BURSA
-            # Jika bursa tutup (Sabtu, Minggu, atau di luar jam 09.00-15.50 WIB)
-            # Autoscreener akan terhenti otomatis & menunggu 5 menit sebelum cek lagi.
-            # =========================================================================
             if is_market_open():
                 now = get_now_wib()
                 today_str, current_time_str = now.strftime('%Y-%m-%d'), now.strftime('%H:%M')
@@ -804,7 +801,7 @@ def auto_screener_loop():
 
                 time.sleep(600)
             else:
-                # Bursa Tutup -> Tahan/Pause Autoscreener selama 300 detik (5 menit)
+                # Standby mode saat bursa tutup/libur
                 time.sleep(300)
 
         except Exception as e:
@@ -858,7 +855,7 @@ def telegram_bot_listener():
                                 "🔍 `/scan`\n"
                                 "  Menjalankan manual Instant Screener (1D).\n\n"
                                 "========================================\n"
-                                "⏱️ *Auto Screener:* Otomatis STANBY saat bursa libur/tutup."
+                                "⏱️ *Auto Screener:* Otomatis STANDBY saat bursa libur/tutup."
                             )
                             send_reply(chat_id, help_msg)
 
