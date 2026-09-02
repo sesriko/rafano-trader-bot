@@ -1,5 +1,5 @@
 # ============================================================
-# RAFANO TRADER V9.3 - OPTIMIZED & ASYNCHRONOUS HYBRID BOT
+# RAFANO TRADER V9.3 - FULL OPTIMIZED & ASYNCHRONOUS HYBRID BOT
 # ============================================================
 
 import os
@@ -15,7 +15,6 @@ import mplfinance as mpf
 import matplotlib.pyplot as plt
 from typing import Optional, Dict, Any, Tuple
 from dataclasses import dataclass
-from functools import lru_cache
 
 # Konfigurasi Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -34,7 +33,7 @@ def _get_arjum_headers() -> Dict[str, str]:
     }
 
 # ============================================================
-# 1. ASYNCHRONOUS DATA PROVIDER MODULE (ARJUM API + FALLBACK)
+# 1. ASYNCHRONOUS DATA PROVIDER & EXTENDED INTELLIGENCE MODULE
 # ============================================================
 
 class AsyncMarketDataProvider:
@@ -57,7 +56,11 @@ class AsyncMarketDataProvider:
             "seasonal": f"{ARJUM_BASE_URL}/seasonal/{ticker_upper}",
             "financials": f"{ARJUM_BASE_URL}/financial-statements/{ticker_upper}?report_type=INCOME_STATEMENT&period=quarterly&limit=4",
             "insiders": f"{ARJUM_BASE_URL}/insiders/{ticker_upper}?page=1&limit=5",
-            "history": f"{ARJUM_BASE_URL}/history/{ticker_upper}?limit=250&frame=daily"
+            "history": f"{ARJUM_BASE_URL}/history/{ticker_upper}?limit=250&frame=daily",
+            # 3 Poin Penguat Data Tambahan Baru
+            "foreign_flow": f"{ARJUM_BASE_URL}/foreign-flow/{ticker_upper}",
+            "broker_summary": f"{ARJUM_BASE_URL}/broker-summary/{ticker_upper}",
+            "bandar_volume": f"{ARJUM_BASE_URL}/bandar-volume/{ticker_upper}"
         }
 
         async with aiohttp.ClientSession() as session:
@@ -70,7 +73,20 @@ class AsyncMarketDataProvider:
     def get_history_sync(ticker: str, limit: int = 250) -> Optional[pd.DataFrame]:
         ticker_upper = ticker.upper()
         
-        # 1. Coba via Arjum API
+        try:
+            url = f"{ARJUM_BASE_URL}/analysis/{ticker_upper}"
+            res = requests.get(url, headers=_get_arjum_headers(), timeout=5)
+            if res.status_code == 200:
+                meta = res.json()
+                is_fca = meta.get("is_fca", False)
+                is_suspended = meta.get("is_suspended", False)
+                suspend_days = meta.get("suspend_duration_days", 0)
+                if is_fca or (is_suspended and suspend_days > 3):
+                    logger.info("Saham %s dilewati (FCA / Suspend > 3 hari).", ticker_upper)
+                    return None
+        except Exception:
+            pass
+
         try:
             url = f"{ARJUM_BASE_URL}/history/{ticker_upper}?limit={limit}&frame=daily"
             res = requests.get(url, headers=_get_arjum_headers(), timeout=10)
@@ -87,12 +103,10 @@ class AsyncMarketDataProvider:
                             df[col] = df[col].astype(float)
                     
                     if not df.empty and len(df) >= 50:
-                        logger.info("Berhasil mengambil data history %s via Arjum API (%d baris).", ticker_upper, len(df))
                         return df.tail(limit)
         except Exception as e:
             logger.warning("Arjum History API gagal untuk %s: %s. Beralih ke yfinance...", ticker_upper, e)
 
-        # 2. Fallback Cadangan via yfinance
         try:
             yf_ticker = f"{ticker_upper}.JK" if not ticker_upper.endswith(".JK") else ticker_upper
             df_yf = yf.download(yf_ticker, period="1y", interval="1d", progress=False)
@@ -101,18 +115,45 @@ class AsyncMarketDataProvider:
                     df_yf.columns = df_yf.columns.droplevel(1)
                 df_yf = df_yf.rename(columns=str.lower)
                 required_cols = ['open', 'high', 'low', 'close', 'volume']
-                if all(col in df_yf.columns for col in df_yf.columns):
+                if all(col in df_yf.columns for col in required_cols):
                     df_yf = df_yf[required_cols].dropna()
-                    logger.info("Berhasil mengambil data history %s via yfinance Fallback.", yf_ticker)
                     return df_yf.tail(limit)
         except Exception as ye:
-            logger.error("yfinance Fallback juga gagal untuk %s: %s", ticker_upper, ye)
+            logger.error("yfinance Fallback gagal untuk %s: %s", ticker_upper, ye)
 
         return None
 
+async def fetch_active_watchlist_300() -> list:
+    url = f"{ARJUM_BASE_URL}/stocks/active"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=_get_arjum_headers(), timeout=15) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    stocks = data.get("data", [])
+                    valid_list = []
+                    for stock in stocks:
+                        ticker = stock.get("symbol")
+                        is_fca = stock.get("is_fca", False)
+                        is_suspended = stock.get("is_suspended", False)
+                        suspend_days = stock.get("suspend_duration_days", 0)
+                        
+                        if not is_fca and not (is_suspended and suspend_days > 3):
+                            valid_list.append(ticker)
+                    
+                    logger.info("Watchlist dinamis berhasil dimuat: %d emiten valid.", len(valid_list))
+                    return valid_list[:300]
+    except Exception as e:
+        logger.error("Gagal fetch active watchlist: %s", e)
+        
+    return [
+        "BBCA", "BBRI", "BMRI", "BBNI", "ASII", "ADRO", "UNVR", "ICBP", "INDF", "KLBF",
+        "AMRT", "ACES", "MAPI", "GOTO", "ARTO", "PGAS", "PTBA", "INCO", "ANTM", "MDKA"
+    ]
+
 
 # ============================================================
-# 2. DATA STRUCTURE
+# 2. DATA STRUCTURE (EXPANDED WITH 3 NEW METRICS)
 # ============================================================
 
 @dataclass
@@ -134,10 +175,13 @@ class CompleteSignal:
     seasonal_trend: str
     insider_action: str
     net_income_growth: str
+    foreign_flow_status: str
+    broker_summary_status: str
+    bandar_profile: str
 
 
 # ============================================================
-# 3. OKE SAHAM CHART GENERATOR MODULE
+# 3. OKE SAHAM CHART GENERATOR MODULE (EMA 200 MAJOR TREND)
 # ============================================================
 
 def generate_oke_saham_chart(df: pd.DataFrame, ticker: str, company_name: str, last_date: str) -> io.BytesIO:
@@ -147,7 +191,7 @@ def generate_oke_saham_chart(df: pd.DataFrame, ticker: str, company_name: str, l
     df['EMA_13'] = df['close'].ewm(span=13, adjust=False).mean()
     df['EMA_20'] = df['close'].ewm(span=20, adjust=False).mean()
     df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
-    df['EMA_200'] = df['close'].ewm(span=200, adjust=False).mean() # Major Trend
+    df['EMA_200'] = df['close'].ewm(span=200, adjust=False).mean() # Major Trend: 200
     
     custom_style = mpf.make_mpf_style(
         base_mpf_style='nightclouds',
@@ -200,7 +244,7 @@ def generate_oke_saham_chart(df: pd.DataFrame, ticker: str, company_name: str, l
 
 
 # ============================================================
-# 4. TECHNICAL ENGINE & SIGNAL BUILDER
+# 4. TECHNICAL ENGINE & EXPANDED SIGNAL BUILDER
 # ============================================================
 
 def calculate_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
@@ -223,7 +267,6 @@ async def build_complete_signal_async(ticker: str) -> Optional[Tuple[CompleteSig
     ticker = ticker.upper()
     df = AsyncMarketDataProvider.get_history_sync(ticker, limit=250)
     if df is None or df.empty or len(df) < 50:
-        logger.warning("Data historis untuk %s tidak mencukupi.", ticker)
         return None
         
     market_data = await AsyncMarketDataProvider.fetch_all_market_data(ticker)
@@ -242,17 +285,35 @@ async def build_complete_signal_async(ticker: str) -> Optional[Tuple[CompleteSig
     financials_data = market_data.get("financials") or {}
     insiders_data = market_data.get("insiders") or {}
     
+    # 3 Poin Ekstra Data API Arjum Baru
+    foreign_data = market_data.get("foreign_flow") or {}
+    broker_sum_data = market_data.get("broker_summary") or {}
+    bandar_vol_data = market_data.get("bandar_volume") or {}
+    
     broker_status = broker_data.get("status", "NEUTRAL")
     seasonal_trend = seasonal_data.get("trend", "FLAT")
     insider_action = insiders_data.get("summary", "NO_ACTION")
     net_income_growth = financials_data.get("growth_status", "STABLE")
+    foreign_flow_status = foreign_data.get("status", "NEUTRAL")
+    broker_summary_status = broker_sum_data.get("status", "NEUTRAL")
+    bandar_profile = bandar_vol_data.get("status", "NEUTRAL")
+    
     company_name = analysis_data.get("company_name", ticker)
     last_date = df.index[-1].strftime("%d %b %Y")
     
     trend_score = 20 if price > ema_200 else 0
     momentum_score = 15 if 50 <= rsi <= 75 else 5
     volume_score = 15 if rel_vol > 1.2 else 0
-    arjum_score = (10 if broker_status == "ACCUMULATION" else 0) + (5 if seasonal_trend == "BULLISH" else 0) + (5 if net_income_growth == "GROWING" else 0)
+    
+    # Pembobotan Nilai Ditambah dari 3 Analisis Baru
+    arjum_score = (
+        (10 if broker_status == "ACCUMULATION" else 0) + 
+        (5 if seasonal_trend == "BULLISH" else 0) + 
+        (5 if net_income_growth == "GROWING" else 0) +
+        (10 if foreign_flow_status == "ACCUMULATION" else 0) +
+        (5 if broker_summary_status == "ACCUMULATION" else 0) +
+        (5 if bandar_profile == "ACCUMULATION" else 0)
+    )
     
     score = min(max(trend_score + momentum_score + volume_score + arjum_score, 0), 100)
     rating = "STRONG BUY" if score >= 80 else ("BUY" if score >= 65 else "WATCHLIST")
@@ -274,7 +335,10 @@ async def build_complete_signal_async(ticker: str) -> Optional[Tuple[CompleteSig
         stop_loss=stop_loss, target_1=target_1, target_2=target_2,
         risk_reward=risk_reward, broker_status=broker_status,
         seasonal_trend=seasonal_trend, insider_action=insider_action,
-        net_income_growth=net_income_growth
+        net_income_growth=net_income_growth,
+        foreign_flow_status=foreign_flow_status,
+        broker_summary_status=broker_summary_status,
+        bandar_profile=bandar_profile
     )
     
     chart_buf = generate_oke_saham_chart(df, ticker, company_name, last_date)
@@ -282,20 +346,19 @@ async def build_complete_signal_async(ticker: str) -> Optional[Tuple[CompleteSig
 
 
 # ============================================================
-# 5. TELEGRAM SENDER MODULE & ASYNC POLLING LOOP
+# 5. TELEGRAM BOT MODULE & 15-MINUTE BACKGROUND SCANNER
 # ============================================================
 
 async def send_rafano_signal_to_telegram(ticker: str, chat_id: str = DEFAULT_CHAT_ID):
     result = await build_complete_signal_async(ticker)
     if not result:
-        logger.warning("Gagal memproses sinyal untuk %s", ticker)
         return False
         
     signal, chart_buf = result
     breakout_text = "YES" if signal.breakout else "NO"
     
     caption = (
-        "🚨 *RAFANO TRADER SIGNAL (V9.3 OPTIMIZED)*\n\n"
+        "🚨 *RAFANO TRADER SIGNAL (V9.3)*\n\n"
         f"📌 Saham: *{signal.ticker}*\n"
         f"💰 Harga: *Rp{signal.price:,.0f}*\n"
         f"⭐ Score: *{signal.score}/100* | Rating: *{signal.rating}*\n\n"
@@ -305,8 +368,11 @@ async def send_rafano_signal_to_telegram(ticker: str, chat_id: str = DEFAULT_CHA
         f"• Rel Volume: `{signal.relative_volume}x`\n"
         f"• Breakout R20: `{breakout_text}` (Rp{signal.resistance:,.0f})\n\n"
         
-        "🏦 *Arjum Market Intelligence*\n"
+        "🏦 *Arjum Market Intelligence (Expanded)*\n"
         f"• Broker Flow: `{signal.broker_status}`\n"
+        f"• Foreign Flow: `{signal.foreign_flow_status}`\n"
+        f"• Broker Summary: `{signal.broker_summary_status}`\n"
+        f"• Bandar Volume: `{signal.bandar_profile}`\n"
         f"• Seasonal Trend: `{signal.seasonal_trend}`\n"
         f"• Net Income Growth: `{signal.net_income_growth}`\n"
         f"• Insider Action: `{signal.insider_action}`\n\n"
@@ -330,15 +396,9 @@ async def send_rafano_signal_to_telegram(ticker: str, chat_id: str = DEFAULT_CHA
             form.add_field('photo', chart_buf.getvalue(), filename='chart.png', content_type='image/png')
             
             async with session.post(url, data=form, timeout=15) as response:
-                if response.status == 200:
-                    logger.info("Berhasil mengirim sinyal & chart %s ke Telegram!", ticker)
-                    return True
-                else:
-                    err_text = await response.text()
-                    logger.error("Gagal kirim Telegram: %s", err_text)
-                    return False
+                return response.status == 200
     except Exception as e:
-        logger.error("Error koneksi ke Telegram API: %s", e)
+        logger.error("Error kirim Telegram: %s", e)
         return False
 
 async def send_text_message(chat_id: str, text: str):
@@ -346,9 +406,34 @@ async def send_text_message(chat_id: str, text: str):
     async with aiohttp.ClientSession() as session:
         await session.post(url, json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"})
 
+async def automated_watchlist_scanner():
+    await asyncio.sleep(15)
+    while True:
+        watchlist = await fetch_active_watchlist_300()
+        logger.info("⏰ Memulai automatic scan untuk %d emiten...", len(watchlist))
+        await send_text_message(DEFAULT_CHAT_ID, f"🔄 *Auto-Scanner:* Memindai {len(watchlist)} emiten aktif (Non-FCA & Non-Suspend)...")
+        
+        sent_count = 0
+        for ticker in watchlist:
+            try:
+                result = await build_complete_signal_async(ticker)
+                if result:
+                    signal, _ = result
+                    if signal.score >= 65:  
+                        await send_rafano_signal_to_telegram(ticker, chat_id=DEFAULT_CHAT_ID)
+                        sent_count += 1
+                        await asyncio.sleep(3) 
+            except Exception as e:
+                logger.error("Error auto-scan %s: %s", ticker, e)
+                
+        logger.info("✅ Auto-scan selesai. %d sinyal terkirim. Jeda 15 menit...", sent_count)
+        await asyncio.sleep(15 * 60)
+
 async def main_telegram_bot():
-    logger.info("🤖 Rafano Trader Bot V9.3 Berjalan dan Mendengarkan Perintah Telegram...")
+    logger.info("🤖 Rafano Trader Bot V9.3 Berjalan (Manual Command + 15-Min Auto Scan)...")
     last_update_id = 0
+    
+    async asyncio.create_task(automated_watchlist_scanner())
     
     async with aiohttp.ClientSession() as session:
         while True:
@@ -369,9 +454,9 @@ async def main_telegram_bot():
                                     if text.lower() in ["/start", "/help"]:
                                         help_text = (
                                             "🤖 *RAFANO TRADER BOT (V9.3)*\n\n"
-                                            "Ketik perintah berikut untuk melihat analisis & chart:\n"
-                                            "• `/oke <kode_saham>`\n"
-                                            "  _Contoh:_ `/oke BBCA` atau `/oke ASII`"
+                                            "• Perintah Manual: `/oke <kode_saham>`\n"
+                                            "  _Contoh:_ `/oke BBCA`\n"
+                                            "• Auto-Scan: Berjalan otomatis setiap 15 menit untuk 300 saham."
                                         )
                                         await send_text_message(c_id, help_text)
                                         
@@ -379,12 +464,12 @@ async def main_telegram_bot():
                                         parts = text.split()
                                         if len(parts) >= 2:
                                             ticker = parts[1].upper()
-                                            await send_text_message(c_id, f"🔍 *Menganalisis & merender chart {ticker}... Mohon tunggu.*")
+                                            await send_text_message(c_id, f"🔍 *Manual Scan:* Menganalisis & merender chart {ticker}...")
                                             await send_rafano_signal_to_telegram(ticker, chat_id=str(c_id))
                                         else:
                                             await send_text_message(c_id, "⚠️ Format salah. Gunakan: `/oke <kode_saham>` (Contoh: `/oke BBCA`)")
             except Exception as e:
-                logger.error(f"Polling loop error: {e}")
+                logger.error(f"Polling error: {e}")
                 await asyncio.sleep(3)
 
 if __name__ == "__main__":
