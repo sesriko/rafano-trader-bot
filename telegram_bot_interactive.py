@@ -7,9 +7,6 @@ import requests
 import pytz
 import numpy as np
 import pandas as pd
-
-import matplotlib
-matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import matplotlib.gridspec as gridspec
@@ -47,15 +44,12 @@ HEADERS = {
 
 SCREENER_ACTIVE = True
 
-# Cooldown Tracker (60 Menit)
+# ==========================================
+# COOLDOWN TRACKER (60 MENIT)
+# ==========================================
 LAST_SENT_SIGNALS = {}
 COOLDOWN_SECONDS = 3600  
 LAST_RESET_DATE = ""
-
-# Lock untuk Thread Safety
-CHART_LOCK = threading.Lock()
-PROCESSING_CHARTS = set()
-CHART_REQ_LOCK = threading.Lock()
 
 def filter_signals_with_cooldown(signals):
     global LAST_RESET_DATE, LAST_SENT_SIGNALS
@@ -119,46 +113,85 @@ TOP_300_IHSG = [
 ]
 
 # ==========================================
-# HELPER FRAKSI HARGA IHSG & METRIK
+# HELPER FRAKSI HARGA IHSG & DETEKSI JAM BURSA
 # ==========================================
+def round_to_ihsg_fraction(price):
+    if pd.isna(price) or price <= 0:
+        return 0
+    price = float(price)
+    if price < 200:
+        tick = 1
+    elif price < 500:
+        tick = 2
+    elif price < 2000:
+        tick = 5
+    elif price < 5000:
+        tick = 10
+    else:
+        tick = 25
+    return int(round(price / tick) * tick)
+
 def safe_int(val, default=0):
     try:
-        if pd.isna(val) or np.isinf(val): return default
+        if pd.isna(val) or np.isinf(val):
+            return default
         return int(val)
     except Exception:
         return default
 
 def format_large_number(val, show_sign=False):
-    if pd.isna(val) or val == 0: return "0"
+    if pd.isna(val) or val == 0:
+        return "0"
     abs_val = abs(val)
     sign = "+" if (show_sign and val > 0) else ("-" if val < 0 else "")
-    if abs_val >= 1_000_000_000: return f"{sign}{abs_val / 1_000_000_000:.2f} Milyar"
-    elif abs_val >= 1_000_000: return f"{sign}{abs_val / 1_000_000:,.0f} Juta"
-    elif abs_val >= 1_000: return f"{sign}{abs_val / 1_000:,.0f} Ribu"
-    else: return f"{sign}{val:,.0f}"
+    if abs_val >= 1_000_000_000:
+        return f"{sign}{abs_val / 1_000_000_000:.2f}B"
+    elif abs_val >= 1_000_000:
+        return f"{sign}{abs_val / 1_000_000:,.0f}M"
+    elif abs_val >= 1_000:
+        return f"{sign}{abs_val / 1_000:,.0f}K"
+    else:
+        return f"{sign}{val:,.0f}"
 
 def is_market_open():
+    """Validasi Sesi Perdagangan IHSG"""
     now = get_now_wib()
     weekday = now.weekday()
-    if weekday >= 5: return False
+    if weekday >= 5: # Sabtu (5) & Minggu (6) bursa tutup
+        return False
+        
     current_time = now.time()
-    if weekday == 4:
-        s1_start, s1_end = datetime.time(9, 0), datetime.time(11, 30)
-        s2_start, s2_end = datetime.time(14, 0), datetime.time(15, 50)
-    else:
-        s1_start, s1_end = datetime.time(9, 0), datetime.time(12, 0)
-        s2_start, s2_end = datetime.time(13, 30), datetime.time(15, 50)
-    return (s1_start <= current_time <= s1_end) or (s2_start <= current_time <= s2_end)
+    if weekday == 4: # Hari Jumat
+        session1_start, session1_end = datetime.time(9, 0), datetime.time(11, 30)
+        session2_start, session2_end = datetime.time(14, 0), datetime.time(15, 50)
+    else: # Senin s/d Kamis
+        session1_start, session1_end = datetime.time(9, 0), datetime.time(12, 0)
+        session2_start, session2_end = datetime.time(13, 30), datetime.time(15, 50)
+        
+    return (session1_start <= current_time <= session1_end) or (session2_start <= current_time <= session2_end)
 
+# ==========================================
+# METRIK RSI, VSA, ATR & SCORE
+# ==========================================
 def calculate_rsi(series, period=14):
     delta = series.diff()
     gain = delta.where(delta > 0, 0.0)
     loss = -delta.where(delta < 0, 0.0)
+    
     avg_gain = gain.ewm(alpha=1/period, min_periods=period, adjust=False).mean()
     avg_loss = loss.ewm(alpha=1/period, min_periods=period, adjust=False).mean()
+    
     rs = avg_gain / avg_loss.replace(0, 0.00001)
     rsi = 100.0 - (100.0 / (1.0 + rs))
     return rsi.fillna(50)
+
+def calculate_atr(df, period=14):
+    high, low, close = df['High'], df['Low'], df['Close']
+    tr1 = high - low
+    tr2 = (high - close.shift(1)).abs()
+    tr3 = (low - close.shift(1)).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    return tr.rolling(window=period, min_periods=1).mean()
 
 def calculate_vsa_metrics(df):
     price_range = (df['High'] - df['Low']).replace(0, 0.1)
@@ -170,6 +203,7 @@ def calculate_vsa_metrics(df):
                  0.45 + (body_move / price_range) * 0.4)
     )
     buy_ratio = np.clip(buy_ratio, 0.05, 0.95)
+    
     df['Vol_Buy'] = df['Volume'] * buy_ratio
     df['Vol_Sell'] = df['Volume'] - df['Vol_Buy']
     df['Net_Vol_VSA'] = df['Vol_Buy'] - df['Vol_Sell']
@@ -177,18 +211,23 @@ def calculate_vsa_metrics(df):
     return df, buy_ratio
 
 def calculate_buy_signal_strength(df):
-    if len(df) < 20: return 0, "NO DATA"
+    if len(df) < 20:
+        return 0, "NO DATA"
+
     last_row = df.iloc[-1]
     last_close, last_open, last_vol = last_row['Close'], last_row['Open'], last_row['Volume']
     avg_vol_v1 = last_row['V1']
+
     df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
     ema_50 = df['EMA50'].iloc[-1]
+
     df, buy_ratios = calculate_vsa_metrics(df)
     last_buy_ratio = buy_ratios[-1]
     net_5d_val = df['Net_Val_VSA'].tail(5).sum()
 
     score = 0
     if last_close > ema_50: score += 25
+
     vol_multiple = last_vol / avg_vol_v1 if avg_vol_v1 > 0 else 0
     if vol_multiple >= 2.5: score += 25
     elif vol_multiple >= 2.0: score += 20
@@ -209,24 +248,38 @@ def calculate_buy_signal_strength(df):
     return score, label
 
 def check_volume_spike_signal(df, symbol, threshold_multiplier=2.0, min_value_traded=500_000_000):
-    if len(df) < 20: return False, {}
+    if len(df) < 20: 
+        return False, {}
+    
     last_row = df.iloc[-1]
     last_close, last_vol = last_row['Close'], last_row['Volume']
-    if last_close <= 50 or last_vol == 0: return False, {}
+
+    if last_close <= 50 or last_vol == 0: 
+        return False, {}
+
     value_traded = last_close * last_vol
-    if value_traded < min_value_traded: return False, {}
+    if value_traded < min_value_traded: 
+        return False, {}
 
     df, buy_ratios = calculate_vsa_metrics(df)
     avg_vol_v1, last_open, last_buy_ratio = last_row['V1'], last_row['Open'], buy_ratios[-1]
+    
     df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
     df['RSI14'] = calculate_rsi(df['Close'], period=14)
     
     ema_50 = df['EMA50'].iloc[-1]
     last_rsi = round(df['RSI14'].iloc[-1], 2)
+
     net_5d_val = df['Net_Val_VSA'].tail(5).sum()
     is_bandar_accum = net_5d_val > 0
 
-    if (last_close > ema_50) and (last_rsi <= 75) and (last_vol >= (avg_vol_v1 * threshold_multiplier)) and is_bandar_accum and (last_buy_ratio > 0.65) and (last_close > last_open):
+    if (last_close > ema_50) and \
+       (last_rsi <= 75) and \
+       (last_vol >= (avg_vol_v1 * threshold_multiplier)) and \
+       is_bandar_accum and \
+       (last_buy_ratio > 0.65) and \
+       (last_close > last_open):
+        
         vol_multiple = last_vol / avg_vol_v1 if avg_vol_v1 > 0 else 0
         change_pct = ((last_close / df['Close'].iloc[-2]) - 1) * 100 if len(df) > 1 else 0.0
         score, score_label = calculate_buy_signal_strength(df)
@@ -240,153 +293,254 @@ def check_volume_spike_signal(df, symbol, threshold_multiplier=2.0, min_value_tr
     return False, {}
 
 # ==========================================
-# CHART GENERATOR ORIGINAL (DENGAN SAFEGUARD)
+# CHART GENERATOR (REVISI MARGIN KIRI & UKURAN EMA)
 # ==========================================
-def generate_pro_chart(df, symbol="BIPI", timeframe="1d", sector_info="Astrindo Nusantara Infrastruktur Tbk. | Energy, Coal", output_filename="chart_output.png"):
-    with CHART_LOCK:
-        try:
-            col_map = {c: str(c).lower().strip() for c in df.columns}
-            df.rename(columns=col_map, inplace=True)
-            df.rename(columns={
-                'open': 'Open', 'high': 'High', 'low': 'Low', 
-                'close': 'Close', 'volume': 'Volume',
-                'date': 'Date', 'datetime': 'Date', 'time': 'Date', 't': 'Date'
-            }, inplace=True)
+def generate_pro_chart(df, symbol="MHKI", timeframe="5m", sector_info="MHKI | IHSG", output_filename="chart_output.png"):
+    try:
+        tf_clean = timeframe.lower().strip()
+        is_intraday = tf_clean in ['1m', '5m', '15m', '30m', '1h']
 
-            if 'Date' in df.columns:
-                df['Date'] = pd.to_datetime(df['Date'])
-                df.set_index('Date', inplace=True)
+        col_map = {c: str(c).lower().strip() for c in df.columns}
+        df.rename(columns=col_map, inplace=True)
+        df.rename(columns={
+            'open': 'Open', 'high': 'High', 'low': 'Low', 
+            'close': 'Close', 'volume': 'Volume',
+            'date': 'Date', 'datetime': 'Date', 'time': 'Date', 't': 'Date'
+        }, inplace=True)
 
-            df = df.ffill().bfill()
-            if isinstance(df.index, pd.DatetimeIndex): df = df.sort_index()
+        if 'Date' in df.columns:
+            df['Date'] = pd.to_datetime(df['Date'])
+            df.set_index('Date', inplace=True)
 
-            for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
+        df = df.ffill().bfill()
+        if isinstance(df.index, pd.DatetimeIndex): 
+            df = df.sort_index()
 
-            df['EMA13'] = df['Close'].ewm(span=13, adjust=False).mean()
-            df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
-            df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
-            df['EMA200'] = df['Close'].ewm(span=200, adjust=False).mean()
+        for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+
+        last_close = df['Close'].iloc[-1]
+        last_open = df['Open'].iloc[-1]
+        last_high = df['High'].iloc[-1]
+        last_low = df['Low'].iloc[-1]
+        last_vol = df['Volume'].iloc[-1]
+
+        # MULTI EMA CALCULATIONS
+        df['EMA8'] = df['Close'].ewm(span=8, adjust=False).mean()
+        df['EMA21'] = df['Close'].ewm(span=21, adjust=False).mean()
+        df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
+        df['EMA125'] = df['Close'].ewm(span=125, adjust=False).mean()
+        
+        df['RSI14'] = calculate_rsi(df['Close'], period=14)
+        df['ATR'] = calculate_atr(df, period=14)
+
+        df['Pivot_High'] = df['High'].rolling(window=12, min_periods=1).max()
+        df['Pivot_Low'] = df['Low'].rolling(window=12, min_periods=1).min()
+        df['V1'] = df['Volume'].rolling(20, min_periods=1).mean()
+
+        df, buy_ratios = calculate_vsa_metrics(df)
+        net_5d_val = df['Net_Val_VSA'].tail(5).sum()
+        net_val_today = df['Net_Val_VSA'].iloc[-1]
+        last_rsi = round(df['RSI14'].iloc[-1], 2)
+        
+        signal_score, score_lbl = calculate_buy_signal_strength(df)
+
+        if 'MM' not in df.columns:
+            df['MM'] = (df['Close'] - df['EMA50']) / df['EMA50'] * 1000 + np.sin(np.linspace(0, 10, len(df))) * 15 - 10.9258
+
+        plt.style.use('dark_background')
+        
+        fig = plt.figure(figsize=(18, 10), dpi=300, facecolor='#000000')
+        gs = gridspec.GridSpec(4, 1, height_ratios=[4, 0.25, 1.2, 0.8], hspace=0.04)
+
+        ax_main = fig.add_subplot(gs[0])
+        ax_bar = fig.add_subplot(gs[1], sharex=ax_main)
+        ax_vol = fig.add_subplot(gs[2], sharex=ax_main)
+        ax_mm = fig.add_subplot(gs[3], sharex=ax_main)
+
+        fig.subplots_adjust(left=0.065, right=0.93, top=0.94, bottom=0.06)
+
+        color_up, color_down, color_neutral = '#00ff00', '#ff0000', '#888888'
+
+        for ax in [ax_main, ax_bar, ax_vol, ax_mm]:
+            ax.set_facecolor('#000000')
+            ax.grid(True, color='#1e1e1e', linestyle=':', linewidth=0.6)
+            ax.tick_params(colors='white', labelsize=10)
+            ax.yaxis.tick_right()
+
+        x_indices = np.arange(len(df))
+
+        # Render Candlestick
+        for i in range(len(df)):
+            open_p, high_p, low_p, close_p = df['Open'].iloc[i], df['High'].iloc[i], df['Low'].iloc[i], df['Close'].iloc[i]
+            if close_p >= open_p:
+                body_top, body_bottom = close_p, open_p
+                body_height = max(0.2, close_p - open_p)
+                ax_main.plot([i, i], [high_p, body_top], color=color_up, linewidth=1.2)
+                ax_main.plot([i, i], [low_p, body_bottom], color=color_up, linewidth=1.2)
+                rect = patches.Rectangle((i - 0.35, body_bottom), 0.7, body_height, linewidth=1.2, edgecolor=color_up, facecolor='none')
+                ax_main.add_patch(rect)
+            else:
+                body_top, body_bottom = open_p, close_p
+                body_height = max(0.2, open_p - close_p)
+                ax_main.plot([i, i], [low_p, high_p], color=color_down, linewidth=1.2)
+                rect = patches.Rectangle((i - 0.35, body_bottom), 0.7, body_height, linewidth=1.2, edgecolor=color_down, facecolor=color_down)
+                ax_main.add_patch(rect)
+
+        ax_main.plot(x_indices, df['EMA8'], color='#00ffff', linewidth=0.8, label='EMA 8')
+        ax_main.plot(x_indices, df['EMA21'], color='#ff00ff', linewidth=1.0, label='EMA 21')
+        ax_main.plot(x_indices, df['EMA50'], color='#ffff00', linewidth=1.1, label='EMA 50')
+        ax_main.plot(x_indices, df['EMA125'], color='#ffffff', linewidth=1.3, label='EMA 125')
+
+        ax_main.step(x_indices, df['Pivot_High'], where='mid', color='#555555', linestyle='--', linewidth=1.0)
+        ax_main.step(x_indices, df['Pivot_Low'], where='mid', color='#444444', linestyle=':', linewidth=1.0)
+
+        last_signal_idx = -10
+        latest_setup = {"status": "WAIT & SEE", "entry": 0, "tp1": 0, "tp2": 0, "danger": 0}
+
+        for i in range(5, len(df)):
+            c_price, o_price = df['Close'].iloc[i], df['Open'].iloc[i]
+            vol_curr, vol_avg = df['Volume'].iloc[i], df['V1'].iloc[i]
+            ema_50 = df['EMA50'].iloc[i]
+            b_ratio = buy_ratios[i]
+            atr_val = df['ATR'].iloc[i]
+            rsi_val = df['RSI14'].iloc[i]
             
-            df['V1'] = df['Volume'].rolling(20, min_periods=1).mean()
-            df['V2'] = df['Volume'].rolling(50, min_periods=1).mean()
+            net_5d_val_i = df['Net_Val_VSA'].iloc[max(0, i-4):i+1].sum()
+            is_bandar_accum_i = net_5d_val_i > 0
 
-            df, buy_ratios = calculate_vsa_metrics(df)
-            df['NBSA'] = df['Net_Val_VSA']
-            
-            net_vol_today = df['Net_Vol_VSA'].iloc[-1]
-            
-            if 'MM' not in df.columns:
-                df['MM'] = (df['Close'] - df['EMA50']) / df['EMA50'] * 1000 - 44.05
+            is_accum_trend = (c_price > 50) and (c_price > ema_50) and (rsi_val <= 75) and (vol_curr >= vol_avg * 2.0) and is_bandar_accum_i and (b_ratio > 0.65) and (c_price > o_price)
 
-            last_close = df['Close'].iloc[-1]
-            last_open = df['Open'].iloc[-1]
-            last_high = df['High'].iloc[-1]
-            last_low = df['Low'].iloc[-1]
-            last_vol = df['Volume'].iloc[-1]
-            prev_close = df['Close'].iloc[-2] if len(df) > 1 else last_close
-            change_pct = ((last_close - prev_close) / prev_close) * 100
+            if is_accum_trend and (i - last_signal_idx >= 4):
+                buy_price = round_to_ihsg_fraction(c_price)
+                tp1_price = round_to_ihsg_fraction(buy_price * 1.035)
+                tp2_price = round_to_ihsg_fraction(buy_price + (1.5 * atr_val))
+                swing_low = df['Pivot_Low'].iloc[i]
+                danger_price = round_to_ihsg_fraction(min(swing_low, buy_price - (1.0 * atr_val)))
 
-            fig = plt.figure(figsize=(16, 9), dpi=200, facecolor='#000000')
-            gs = gridspec.GridSpec(4, 1, height_ratios=[4.0, 1.2, 0.9, 0.9], hspace=0.05)
+                ax_main.plot(i, df['Low'].iloc[i] * 0.985, marker='^', color='#00ff00', markersize=7, zorder=6)
+                if i >= len(df) - 3:
+                    ax_main.text(i, df['Low'].iloc[i] * 0.96, f"BUY @ {buy_price}", color='#00ff00', fontsize=8, fontweight='bold', ha='center',
+                                 bbox=dict(boxstyle='round,pad=0.2', facecolor='#000000', alpha=0.75, edgecolor='#00ff00'))
 
-            ax_main = fig.add_subplot(gs[0])
-            ax_vol = fig.add_subplot(gs[1], sharex=ax_main)
-            ax_nbsa = fig.add_subplot(gs[2], sharex=ax_main)
-            ax_mm = fig.add_subplot(gs[3], sharex=ax_main)
+                latest_setup = {"status": "BUY ACCUMULATION", "entry": buy_price, "tp1": tp1_price, "tp2": tp2_price, "danger": danger_price}
+                last_signal_idx = i
 
-            fig.subplots_adjust(left=0.03, right=0.92, top=0.91, bottom=0.06)
+        max_high = df['High'].max()
+        min_low = df['Low'].min()
+        ax_main.set_ylim(min_low * 0.95, max_high * 1.25)
+        ax_main.set_xlim(-0.5, len(df) - 0.5)
 
-            for ax in [ax_main, ax_vol, ax_nbsa, ax_mm]:
-                ax.set_facecolor('#000000')
-                ax.grid(True, color='#222222', linestyle=':', linewidth=0.5)
-                ax.tick_params(colors='white', labelsize=8)
-                ax.yaxis.tick_right()
+        # DASHBOARD OVERLAY (COMPACT SISI KIRI)
+        status_color = "#00ff00" if latest_setup["status"] == "BUY ACCUMULATION" else "#ffff00"
+        
+        entry_val = latest_setup['entry'] if latest_setup['entry'] > 0 else last_close
+        tp1_val = latest_setup['tp1'] if latest_setup['tp1'] > 0 else round_to_ihsg_fraction(last_close*1.035)
+        tp2_val = latest_setup['tp2'] if latest_setup['tp2'] > 0 else round_to_ihsg_fraction(last_close*1.07)
+        sl_val = latest_setup['danger'] if latest_setup['danger'] > 0 else round_to_ihsg_fraction(last_close*0.95)
 
-            x_indices = np.arange(len(df))
-            color_up, color_down = '#00ff00', '#ff0000'
+        dashboard_text = (
+            f"RAFANO DASHBOARD\n"
+            f"-----------------------\n"
+            f"O:{safe_int(last_open)} H:{safe_int(last_high)} L:{safe_int(last_low)} C:{safe_int(last_close)}\n"
+            f"VOL: {format_large_number(last_vol)}\n"
+            f"-----------------------\n"
+            f"SCORE  : {signal_score}% ({score_lbl})\n"
+            f"STATUS : {latest_setup['status']}\n"
+            f"ENTRY  : {entry_val}\n"
+            f"TP1    : {tp1_val}\n"
+            f"TP2    : {tp2_val}\n"
+            f"SL     : {sl_val}"
+        )
+        
+        ax_main.text(0.01, 0.96, dashboard_text, transform=ax_main.transAxes, verticalalignment='top', horizontalalignment='left',
+                     fontfamily='monospace', fontsize=8.5, color=status_color,
+                     bbox=dict(boxstyle='round,pad=0.3', facecolor='#000000', alpha=0.75, edgecolor='#333333'))
 
-            for i in range(len(df)):
-                open_p, high_p, low_p, close_p = df['Open'].iloc[i], df['High'].iloc[i], df['Low'].iloc[i], df['Close'].iloc[i]
-                if close_p >= open_p:
-                    body_top, body_bottom = close_p, open_p
-                    body_height = max(0.2, close_p - open_p)
-                    ax_main.plot([i, i], [high_p, body_top], color=color_up, linewidth=1.0)
-                    ax_main.plot([i, i], [low_p, body_bottom], color=color_up, linewidth=1.0)
-                    rect = patches.Rectangle((i - 0.35, body_bottom), 0.7, body_height, linewidth=1.0, edgecolor=color_up, facecolor='none')
-                    ax_main.add_patch(rect)
-                else:
-                    body_top, body_bottom = open_p, close_p
-                    body_height = max(0.2, open_p - close_p)
-                    ax_main.plot([i, i], [low_p, high_p], color=color_down, linewidth=1.0)
-                    rect = patches.Rectangle((i - 0.35, body_bottom), 0.7, body_height, linewidth=1.0, edgecolor=color_down, facecolor=color_down)
-                    ax_main.add_patch(rect)
+        stat_text_right = (
+            f"RSI (14)   : {last_rsi}\n"
+            f"BANDAR 1W  : {'ACCUM' if net_5d_val > 0 else 'DISTRIB'}\n"
+            f"VAL 1D     : {format_large_number(net_val_today, show_sign=True)}\n"
+            f"VSA BUY    : {safe_int(buy_ratios[-1]*100)}%"
+        )
+        ax_main.text(0.985, 0.96, stat_text_right, transform=ax_main.transAxes, verticalalignment='top', horizontalalignment='right',
+                     fontfamily='monospace', fontsize=8.5, color='#00ffff',
+                     bbox=dict(boxstyle='round,pad=0.3', facecolor='#000000', alpha=0.75, edgecolor='#333333'))
 
-            ax_main.plot(x_indices, df['EMA13'], color='#ffff00', linewidth=1.1, label='EMA 13')
-            ax_main.plot(x_indices, df['EMA20'], color='#ff0000', linewidth=1.1, label='EMA 20')
-            ax_main.plot(x_indices, df['EMA50'], color='#ffffff', linewidth=1.2, label='EMA 50')
-            ax_main.plot(x_indices, df['EMA200'], color='#a020f0', linewidth=1.5, label='EMA 200')
+        latest_ph, latest_pl = df['Pivot_High'].iloc[-1], df['Pivot_Low'].iloc[-1]
+        
+        ax_main.text(1.01, latest_ph, f" {safe_int(latest_ph)} ", 
+                     transform=ax_main.get_yaxis_transform(),
+                     color='black', backgroundcolor='#ffff00', 
+                     fontsize=8.5, fontweight='bold', va='center', ha='left', clip_on=False)
+                     
+        ax_main.text(1.01, latest_pl, f" {safe_int(latest_pl)} ", 
+                     transform=ax_main.get_yaxis_transform(),
+                     color='black', backgroundcolor='#00ffff', 
+                     fontsize=8.5, fontweight='bold', va='center', ha='left', clip_on=False)
 
-            fig.text(0.03, 0.960, f"{symbol} :    {safe_int(last_close)} ({change_pct:+.2f}%)", color='#ffff00', fontsize=14, fontweight='bold')
-            fig.text(0.03, 0.938, f"{sector_info}", color='#888888', fontsize=8)
-            fig.text(0.50, 0.960, "RAFANO TRADER", color='#ffffff', fontsize=15, fontweight='bold', ha='center')
-            
-            last_date_str = get_now_wib().strftime('%d %b %Y')
-            fig.text(0.92, 0.960, f"Daily {last_date_str}", color='#ffffff', fontsize=9, fontweight='bold', ha='right')
+        # HEADER CHART
+        fig.text(0.01, 0.975, f"{symbol}", color='#ffffff', fontsize=16, fontweight='bold')
+        fig.text(0.45, 0.975, "RAFANO TRADER", color='#ffffff', fontsize=15, fontweight='bold')
+        
+        last_date_str = get_now_wib().strftime('%d %b %Y')
+        fig.text(0.88, 0.975, f"{tf_clean.upper()} {last_date_str}", color='#ffff00', fontsize=10, fontweight='bold', ha='right')
 
-            sub_info_ohlc = f"High:{safe_int(last_high)}  Low:{safe_int(last_low)}  Open:{safe_int(last_open)}  Volume:{safe_int(last_vol):,}  V1:{safe_int(df['V1'].iloc[-1]):,}"
-            fig.text(0.03, 0.920, sub_info_ohlc, color='#00ffff', fontsize=8, fontfamily='monospace')
+        sub_header = f"{sector_info}"
+        fig.text(0.01, 0.945, sub_header, color='#888888', fontsize=8.5)
 
-            last_ema200 = df['EMA200'].iloc[-1]
-            ax_main.text(1.005, last_ema200, f" EMA 200 ", transform=ax_main.get_yaxis_transform(),
-                         color='white', backgroundcolor='#a020f0', fontsize=7, fontweight='bold', va='center', clip_on=False)
-            ax_main.text(1.005, last_close, f" {safe_int(last_close)} ", transform=ax_main.get_yaxis_transform(),
-                         color='black', backgroundcolor='#00ff00' if last_close >= last_open else '#ff0000', 
-                         fontsize=7, fontweight='bold', va='center', clip_on=False)
+        for i in range(len(df)):
+            c, o = df['Close'].iloc[i], df['Open'].iloc[i]
+            bar_color = color_neutral if abs(c - o) / max(1, o) < 0.0005 else (color_up if c >= o else color_down)
+            ax_bar.add_patch(patches.Rectangle((i - 0.5, 0), 1.0, 1.0, color=bar_color))
+        ax_bar.set_ylim(0, 1)
+        ax_bar.axis('off')
 
-            ax_vol.bar(x_indices, df['Vol_Sell'], color='#ff0000', width=0.8)
-            ax_vol.bar(x_indices, df['Vol_Buy'], bottom=df['Vol_Sell'], color='#00ff00', width=0.8)
-            ax_vol.plot(x_indices, df['V1'], color='#ffffff', linewidth=0.8)
+        ax_vol.bar(x_indices, df['Vol_Sell'], color='#ff0000', width=0.8, align='center')
+        ax_vol.bar(x_indices, df['Vol_Buy'], bottom=df['Vol_Sell'], color='#00ff00', width=0.8, align='center')
+        ax_vol.plot(x_indices, df['V1'], color='#ffffff', linewidth=1.0, linestyle='-')
+        
+        net_val_str = format_large_number(net_val_today, show_sign=True)
+        net_5d_val_str = format_large_number(net_5d_val, show_sign=True)
+        last_buy_pct = safe_int(buy_ratios[-1] * 100)
+        vol_text = (f"Buy: {last_buy_pct}%  Sell: {100 - last_buy_pct}%  Val 1D: {net_val_str}  Val 5D: {net_5d_val_str}")
+        ax_vol.text(0.01, 0.85, vol_text, transform=ax_vol.transAxes, color='#00ffff', fontsize=8, fontweight='bold')
+        ax_vol.set_ylim(0, df['Volume'].max() * 1.35)
 
-            buy_pct = safe_int(buy_ratios[-1] * 100)
-            vol_info_text = f"Buy Vol = {buy_pct}%   Sell Vol = {100-buy_pct}%   Net Vol = {safe_int(net_vol_today):,}"
-            ax_vol.text(0.01, 0.80, vol_info_text, transform=ax_vol.transAxes, color='#ffff00', fontsize=8, fontweight='bold')
+        mm_colors = ['#ffff00' if v >= 0 else '#555555' for v in df['MM']]
+        ax_mm.bar(x_indices, df['MM'], color=mm_colors, width=0.4)
+        ax_mm.text(0.01, 0.80, "Market Maker", transform=ax_mm.transAxes, color='#ffff00', fontsize=8, fontweight='bold')
+        
+        ax_mm.text(1.01, df['MM'].iloc[-1], f" {df['MM'].iloc[-1]:.2f} ", 
+                   transform=ax_mm.get_yaxis_transform(),
+                   color='black', backgroundcolor='#ffff00', 
+                   fontsize=8.5, fontweight='bold', va='center', ha='left', clip_on=False)
 
-            nbsa_colors = ['#00ffff' if val >= 0 else '#ff0000' for val in df['NBSA']]
-            ax_nbsa.bar(x_indices, df['NBSA'], color=nbsa_colors, width=0.6)
-            
-            last_nbsa_val = df['NBSA'].iloc[-1]
-            nbsa_str = format_large_number(last_nbsa_val, show_sign=True)
-            total_val_traded = last_close * last_vol
-            nbsa_val_pct = (abs(last_nbsa_val) / total_val_traded * 100) if total_val_traded > 0 else 0.0
-            
-            ax_nbsa.text(0.01, 0.70, f"NBSA Rp. {nbsa_str} ({nbsa_val_pct:.1f}%)", transform=ax_nbsa.transAxes, color='#ffff00', fontsize=8, fontweight='bold')
+        step = max(1, len(df) // 8)
+        ax_mm.set_xticks(x_indices[::step])
+        if isinstance(df.index, pd.DatetimeIndex):
+            fmt = "%H:%M" if is_intraday else "%b %Y"
+            ax_mm.set_xticklabels([df.index[k].strftime(fmt) for k in range(0, len(df), step)])
 
-            mm_colors = ['#ffffff' if val >= 0 else '#888888' for val in df['MM']]
-            ax_mm.bar(x_indices, df['MM'], color=mm_colors, width=0.4)
-            ax_mm.text(0.01, 0.70, "Market Maker Momentum", transform=ax_mm.transAxes, color='#ffff00', fontsize=8)
-            ax_mm.set_ylim(-200, 200)
+        plt.setp(ax_main.get_xticklabels(), visible=False)
+        plt.setp(ax_vol.get_xticklabels(), visible=False)
 
-            step = max(1, len(df) // 7)
-            ax_mm.set_xticks(x_indices[::step])
-            if isinstance(df.index, pd.DatetimeIndex):
-                ax_mm.set_xticklabels([df.index[k].strftime("%b %y") for k in range(0, len(df), step)])
-
-            plt.setp(ax_main.get_xticklabels(), visible=False)
-            plt.setp(ax_vol.get_xticklabels(), visible=False)
-            plt.setp(ax_nbsa.get_xticklabels(), visible=False)
-
-            fig.savefig(output_filename, dpi=200, bbox_inches='tight', facecolor=fig.get_facecolor())
-            plt.close(fig)
-            return output_filename
-        except Exception as e:
-            print(f"Error Generating Chart: {e}")
-            plt.close('all')
-            return None
+        plt.savefig(
+            output_filename, 
+            dpi=300, 
+            bbox_inches='tight', 
+            pad_inches=0.05,
+            facecolor=fig.get_facecolor(),
+            format='png'
+        )
+        return output_filename
+    finally:
+        plt.clf()
+        plt.close('all')
 
 # ==========================================
-# FETCH DATA ORIGINAL
+# FETCH DATA & SCANNER
 # ==========================================
 def fetch_stock_history_multi_tf(symbol, timeframe="1d"):
     timeframe = timeframe.lower().strip()
@@ -462,24 +616,35 @@ def run_scan_process_custom_tf(timeframe="1d"):
     return detected_signals
 
 # ==========================================
-# TELEGRAM BROADCASTER & HANDLER
+# TELEGRAM BROADCASTER
 # ==========================================
 def send_reply(chat_id, text, reply_markup=None):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
-    if reply_markup: payload["reply_markup"] = reply_markup
-    try: requests.post(url, json=payload, timeout=5)
-    except Exception as e: print(f"❌ Error Send Message: {e}")
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    try:
+        requests.post(url, json=payload, timeout=10)
+    except Exception as e:
+        print(f"❌ Error Send Message: {e}")
 
 def send_photo_reply(chat_id, photo_path, caption=""):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
     try:
         with open(photo_path, 'rb') as photo:
-            requests.post(url, data={'chat_id': chat_id, 'caption': caption, 'parse_mode': 'Markdown'}, files={'photo': photo}, timeout=20)
-    except Exception as e: print(f"❌ Error Send Photo: {e}")
+            requests.post(
+                url, 
+                data={'chat_id': chat_id, 'caption': caption, 'parse_mode': 'Markdown'}, 
+                files={'photo': photo}, 
+                timeout=30
+            )
+    except Exception as e:
+        print(f"❌ Error Send Photo: {e}")
 
 def broadcast_screening_results(signals, title_header, tf_code, target_chat_id=None):
-    if target_chat_id is None: target_chat_id = TARGET_CHAT_ID
+    if target_chat_id is None:
+        target_chat_id = TARGET_CHAT_ID
+
     now_str = get_now_wib().strftime('%d %b %Y %H:%M WIB')
     
     header_msg = (
@@ -507,7 +672,8 @@ def broadcast_screening_results(signals, title_header, tf_code, target_chat_id=N
         )
         
         inline_keyboard.append([
-            {"text": f"📊 Chart {item['symbol']} (Daily)", "callback_data": f"chart_{item['symbol']}_1d"}
+            {"text": f"📈 {item['symbol']} (Daily)", "callback_data": f"chart_{item['symbol']}_1d"},
+            {"text": f"📊 {item['symbol']} ({tf_code.upper()})", "callback_data": f"chart_{item['symbol']}_{tf_code}"}
         ])
 
         if len(current_msg) + len(item_str) > 3800:
@@ -521,121 +687,65 @@ def broadcast_screening_results(signals, title_header, tf_code, target_chat_id=N
     if current_msg:
         send_reply(target_chat_id, current_msg, reply_markup={"inline_keyboard": inline_keyboard})
 
+# ==========================================
+# HANDLER PERINTAH PANGGIL CHART BOT (/c)
+# ==========================================
 def process_chart_request(chat_id, stock_code, timeframe="1d"):
-    req_key = f"{chat_id}_{stock_code.upper()}_{timeframe.lower()}"
-    with CHART_REQ_LOCK:
-        if req_key in PROCESSING_CHARTS:
-            return
-        PROCESSING_CHARTS.add(req_key)
+    timeframe = timeframe.lower().strip()
+    if timeframe in ['d', 'day', 'daily', '1d']: timeframe = '1d'
+    if timeframe in ['5', '5mi', 'm5']: timeframe = '5m'
+    if timeframe in ['15', '15mi', 'm15']: timeframe = '15m'
 
-    try:
-        timeframe = timeframe.lower().strip()
-        if timeframe in ['d', 'day', 'daily', '1d']: timeframe = '1d'
-
-        df = fetch_stock_history_multi_tf(stock_code, timeframe=timeframe)
+    send_reply(chat_id, f"📊 *Generating Pro Chart {stock_code.upper()} ({timeframe.upper()})...*")
+    df = fetch_stock_history_multi_tf(stock_code, timeframe=timeframe)
+    
+    if df is not None and not df.empty and len(df) >= 20:
+        column_mapping = {'open':'Open', 'high':'High', 'low':'Low', 'close':'Close', 'volume':'Volume'}
+        df.rename(columns=lambda x: column_mapping.get(str(x).lower().strip(), x), inplace=True)
         
-        if df is not None and not df.empty and len(df) >= 20:
-            col_map = {'open':'Open', 'high':'High', 'low':'Low', 'close':'Close', 'volume':'Volume'}
-            df.rename(columns=lambda x: col_map.get(str(x).lower().strip(), x), inplace=True)
-            
-            output_img = f"chart_{stock_code}_{timeframe}_{int(time.time())}.png"
-            chart_file = generate_pro_chart(df, symbol=stock_code.upper(), timeframe=timeframe, sector_info=f"{stock_code.upper()} | IHSG", output_filename=output_img)
-            
-            if chart_file and os.path.exists(chart_file):
-                caption = f"📊 *Chart {stock_code.upper()} ({timeframe.upper()})*"
-                send_photo_reply(chat_id, chart_file, caption=caption)
-                os.remove(chart_file)
-        else:
-            send_reply(chat_id, f"❌ Data saham untuk *{stock_code.upper()}* tidak ditemukan atau data kurang memadai.")
-    finally:
-        with CHART_REQ_LOCK:
-            PROCESSING_CHARTS.discard(req_key)
+        output_file = f"chart_{stock_code.lower()}_{timeframe}.png"
+        sector_info = f"{stock_code.upper()} | IHSG Trading System"
+        
+        generated_path = generate_pro_chart(df, symbol=stock_code.upper(), timeframe=timeframe, sector_info=sector_info, output_filename=output_file)
+        
+        last_close = safe_int(df['Close'].iloc[-1])
+        caption = f"📈 *PRO CHART {stock_code.upper()} ({timeframe.upper()})*\nLast Price: {last_close}"
+        
+        send_photo_reply(chat_id, generated_path, caption=caption)
+        
+        if os.path.exists(generated_path):
+            os.remove(generated_path)
+    else:
+        send_reply(chat_id, f"❌ Data saham untuk *{stock_code.upper()}* ({timeframe}) tidak ditemukan atau belum mencukupi.")
 
 # ==========================================
-# BOT LISTENER & SCREENER LOOP
+# MAIN LOOP SCANNER (AUTOMATION 10 MENIT)
 # ==========================================
-def telegram_polling():
-    offset = None
-    print("🤖 Telegram Bot Listener Active...")
-    while True:
+def main_screener_loop():
+    print("🚀 Screener Loop Aktif (Interval Scan: 10 Menit)...")
+    while SCREENER_ACTIVE:
         try:
-            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates"
-            params = {"timeout": 30, "offset": offset}
-            res = requests.get(url, params=params, timeout=35)
-            if res.status_code == 200:
-                updates = res.json().get("result", [])
-                for upd in updates:
-                    offset = upd["update_id"] + 1
-                    
-                    if "message" in upd and "text" in upd["message"]:
-                        chat_id = upd["message"]["chat"]["id"]
-                        text = upd["message"]["text"].strip()
-                        
-                        if text.lower().startswith("/c ") or text.lower().startswith("/chart "):
-                            parts = text.split()
-                            if len(parts) >= 2:
-                                sym = parts[1].upper()
-                                tf = parts[2].lower() if len(parts) >= 3 else "1d"
-                                req_key = f"{chat_id}_{sym}_{tf}"
-                                if req_key not in PROCESSING_CHARTS:
-                                    send_reply(chat_id, f"📊 *Generating chart {sym}...*")
-                                    threading.Thread(target=process_chart_request, args=(chat_id, sym, tf)).start()
-                        elif text.lower() == "/scan":
-                            send_reply(chat_id, "🔍 *Menjalankan Manual Screening IHSG...*")
-                            signals = run_scan_process_custom_tf("1d")
-                            filtered = filter_signals_with_cooldown(signals)
-                            broadcast_screening_results(filtered, "🚨 *MANUAL SCREENER RESULT*", "1d", target_chat_id=chat_id)
-
-                    elif "callback_query" in upd:
-                        cb = upd["callback_query"]
-                        cb_id = cb["id"]
-                        chat_id = cb["message"]["chat"]["id"]
-                        cb_data = cb["data"]
-                        
-                        try:
-                            requests.post(
-                                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery", 
-                                json={"callback_query_id": cb_id}, 
-                                timeout=3
-                            )
-                        except Exception:
-                            pass
-                        
-                        if cb_data.startswith("chart_"):
-                            parts = cb_data.split("_")
-                            if len(parts) >= 3:
-                                sym = parts[1].upper()
-                                tf = parts[2].lower()
-                                req_key = f"{chat_id}_{sym}_{tf}"
-                                
-                                if req_key not in PROCESSING_CHARTS:
-                                    send_reply(chat_id, f"📊 *Generating chart {sym}...*")
-                                    threading.Thread(target=process_chart_request, args=(chat_id, sym, tf)).start()
-
-        except Exception:
-            time.sleep(2)
-
-def scheduled_screener_loop():
-    print("📈 Automatic Market Screener Engine Started...")
-    while True:
-        try:
-            if is_market_open() and SCREENER_ACTIVE:
-                print(f"[{get_now_wib().strftime('%H:%M:%S')}] Executing Market Scan...")
-                signals = run_scan_process_custom_tf("1d")
-                filtered_signals = filter_signals_with_cooldown(signals)
+            if is_market_open():
+                print(f"[{get_now_wib().strftime('%H:%M:%S')}] Memulai Pemindaian Bursa...")
+                raw_signals = run_scan_process_custom_tf(timeframe="1d")
+                filtered_signals = filter_signals_with_cooldown(raw_signals)
+                
                 if filtered_signals:
-                    broadcast_screening_results(filtered_signals, "🚀 *VOLUME ENGINE SPIKE SIGNAL*", "1d")
-            time.sleep(300)
+                    broadcast_screening_results(
+                        signals=filtered_signals,
+                        title_header="🚨 *SIGNAL DETECTED — RAFANO VOLUME ENGINE*",
+                        tf_code="1d"
+                    )
+                else:
+                    print(f"[{get_now_wib().strftime('%H:%M:%S')}] Tidak ada sinyal baru atau masih terhalang cooldown.")
+            else:
+                print(f"[{get_now_wib().strftime('%H:%M:%S')}] Bursa Tutup. Standby...")
+
         except Exception as e:
-            print(f"❌ Error Screener Loop: {e}")
-            time.sleep(10)
+            print(f"❌ Exception pada Screener Loop: {e}")
+
+        # PENJADWALAN KEMBALI KE 1x 10 MENIT (600 DETIK)
+        time.sleep(600)
 
 if __name__ == "__main__":
-    t_bot = threading.Thread(target=telegram_polling, daemon=True)
-    t_screener = threading.Thread(target=scheduled_screener_loop, daemon=True)
-    
-    t_bot.start()
-    t_screener.start()
-    
-    while True:
-        time.sleep(1)
+    main_screener_loop()
