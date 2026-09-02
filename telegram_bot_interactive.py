@@ -180,7 +180,7 @@ class CompleteSignal:
 
 
 # ============================================================
-# 3. OKE SAHAM CHART GENERATOR MODULE (EMA 200 MAJOR TREND)
+# 3. OKE SAHAM CHART GENERATOR MODULE (EMA 50 MAJOR TREND)
 # ============================================================
 
 def generate_oke_saham_chart(df: pd.DataFrame, ticker: str, company_name: str, last_date: str) -> io.BytesIO:
@@ -189,8 +189,7 @@ def generate_oke_saham_chart(df: pd.DataFrame, ticker: str, company_name: str, l
         
     df['EMA_13'] = df['close'].ewm(span=13, adjust=False).mean()
     df['EMA_20'] = df['close'].ewm(span=20, adjust=False).mean()
-    df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
-    df['EMA_200'] = df['close'].ewm(span=200, adjust=False).mean() # Major Trend: 200 (Sesuai instruksi)
+    df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean() # Major Trend: 50 (Sesuai instruksi)
     
     custom_style = mpf.make_mpf_style(
         base_mpf_style='nightclouds',
@@ -215,8 +214,7 @@ def generate_oke_saham_chart(df: pd.DataFrame, ticker: str, company_name: str, l
     apds = [
         mpf.make_addplot(df['EMA_13'], color='#29b6f6', width=0.8),
         mpf.make_addplot(df['EMA_20'], color='#ffa726', width=0.8),
-        mpf.make_addplot(df['EMA_50'], color='#ab47bc', width=1.0),
-        mpf.make_addplot(df['EMA_200'], color='#ef5350', width=1.2),
+        mpf.make_addplot(df['EMA_50'], color='#ef5350', width=1.2),
     ]
     
     buf = io.BytesIO()
@@ -248,7 +246,6 @@ def generate_oke_saham_chart(df: pd.DataFrame, ticker: str, company_name: str, l
 
 def calculate_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df['ema_50'] = df['close'].ewm(span=50, adjust=False).mean()
-    df['ema_200'] = df['close'].ewm(span=200, adjust=False).mean()
     
     delta = df['close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
@@ -273,7 +270,7 @@ async def build_complete_signal_async(ticker: str) -> Optional[Tuple[CompleteSig
     latest = df.iloc[-1]
     
     price = float(latest['close'])
-    ema_200 = float(latest['ema_200']) if not np.isnan(latest['ema_200']) else price
+    ema_50 = float(latest['ema_50']) if not np.isnan(latest['ema_50']) else price
     rsi = float(latest['rsi']) if not np.isnan(latest['rsi']) else 50.0
     rel_vol = float(latest['rel_vol']) if not np.isnan(latest['rel_vol']) else 1.0
     atr = float(latest['atr']) if not np.isnan(latest['atr']) else (price * 0.03)
@@ -299,7 +296,7 @@ async def build_complete_signal_async(ticker: str) -> Optional[Tuple[CompleteSig
     company_name = analysis_data.get("company_name", ticker)
     last_date = df.index[-1].strftime("%d %b %Y")
     
-    trend_score = 20 if price > ema_200 else 0
+    trend_score = 20 if price > ema_50 else 0
     momentum_score = 15 if 50 <= rsi <= 75 else 5
     volume_score = 15 if rel_vol > 1.2 else 0
     
@@ -430,7 +427,6 @@ async def main_telegram_bot():
     logger.info("🤖 Rafano Trader Bot V9.3 Berjalan (Manual Command + 15-Min Auto Scan)...")
     last_update_id = 0
     
-    # Perbaikan Syntax Error (tanpa kata 'async' di depan create_task)
     asyncio.create_task(automated_watchlist_scanner())
     
     async with aiohttp.ClientSession() as session:
