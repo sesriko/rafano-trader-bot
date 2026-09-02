@@ -345,11 +345,11 @@ def generate_pro_chart(df, symbol="BIPI", timeframe="1d", sector_info="Astrindo 
         # Header Atas
         fig.text(0.03, 0.965, f"{symbol} :    {safe_int(last_close)} ({change_pct:+.2f}%)", color='#ffff00', fontsize=15, fontweight='bold')
         fig.text(0.03, 0.945, f"{sector_info}", color='#888888', fontsize=8.5)
-        fig.text(0.50, 0.965, "OKE SAHAM", color='#ffffff', fontsize=16, fontweight='bold', ha='center')
+        fig.text(0.50, 0.965, "RAFANO TRADER", color='#ffffff', fontsize=16, fontweight='bold', ha='center')
         
         last_date_str = get_now_wib().strftime('%d %b %Y')
         fig.text(0.94, 0.965, f"Daily {last_date_str}", color='#ffffff', fontsize=10, fontweight='bold', ha='right')
-        fig.text(0.94, 0.945, "Registrasi BOT 089612331428", color='#ffff00', fontsize=9, ha='right')
+        
 
         sub_info_ohlc = f"High:{safe_int(last_high)}    Low:{safe_int(last_low)}    Open:{safe_int(last_open)}    Volume:{safe_int(last_vol):,}    V1:{safe_int(df['V1'].iloc[-1]):,}    V2:{safe_int(df['V2'].iloc[-1]):,}"
         fig.text(0.03, 0.930, sub_info_ohlc, color='#00ffff', fontsize=8.5, fontfamily='monospace')
