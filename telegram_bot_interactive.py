@@ -8,7 +8,6 @@ import pytz
 import numpy as np
 import pandas as pd
 
-# Gunakan backend non-GUI agar Thread-Safe saat render chart di background
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -53,10 +52,8 @@ LAST_SENT_SIGNALS = {}
 COOLDOWN_SECONDS = 3600  
 LAST_RESET_DATE = ""
 
-# Lock untuk Thread Safety pembuatan chart Matplotlib
+# Lock untuk Thread Safety
 CHART_LOCK = threading.Lock()
-
-# Set untuk mencegah duplikasi request chart bersamaan
 PROCESSING_CHARTS = set()
 CHART_REQ_LOCK = threading.Lock()
 
@@ -243,7 +240,7 @@ def check_volume_spike_signal(df, symbol, threshold_multiplier=2.0, min_value_tr
     return False, {}
 
 # ==========================================
-# CHART GENERATOR (RAFANO TRADER DESIGN)
+# CHART GENERATOR ORIGINAL (DENGAN SAFEGUARD)
 # ==========================================
 def generate_pro_chart(df, symbol="BIPI", timeframe="1d", sector_info="Astrindo Nusantara Infrastruktur Tbk. | Energy, Coal", output_filename="chart_output.png"):
     with CHART_LOCK:
@@ -389,7 +386,7 @@ def generate_pro_chart(df, symbol="BIPI", timeframe="1d", sector_info="Astrindo 
             return None
 
 # ==========================================
-# FETCH DATA & SCANNER
+# FETCH DATA ORIGINAL
 # ==========================================
 def fetch_stock_history_multi_tf(symbol, timeframe="1d"):
     timeframe = timeframe.lower().strip()
@@ -510,8 +507,7 @@ def broadcast_screening_results(signals, title_header, tf_code, target_chat_id=N
         )
         
         inline_keyboard.append([
-            {"text": f"📈 {item['symbol']} (Daily)", "callback_data": f"chart_{item['symbol']}_1d"},
-            {"text": f"📊 {item['symbol']} ({tf_code.upper()})", "callback_data": f"chart_{item['symbol']}_{tf_code}"}
+            {"text": f"📊 Chart {item['symbol']} (Daily)", "callback_data": f"chart_{item['symbol']}_1d"}
         ])
 
         if len(current_msg) + len(item_str) > 3800:
@@ -526,17 +522,15 @@ def broadcast_screening_results(signals, title_header, tf_code, target_chat_id=N
         send_reply(target_chat_id, current_msg, reply_markup={"inline_keyboard": inline_keyboard})
 
 def process_chart_request(chat_id, stock_code, timeframe="1d"):
-    req_key = f"{chat_id}_{stock_code}_{timeframe}"
+    req_key = f"{chat_id}_{stock_code.upper()}_{timeframe.lower()}"
     with CHART_REQ_LOCK:
         if req_key in PROCESSING_CHARTS:
-            return  # Abaikan request jika saham & timeframe yang sama sedang diproses
+            return
         PROCESSING_CHARTS.add(req_key)
 
     try:
         timeframe = timeframe.lower().strip()
         if timeframe in ['d', 'day', 'daily', '1d']: timeframe = '1d'
-        if timeframe in ['5', '5mi', 'm5']: timeframe = '5m'
-        if timeframe in ['15', '15mi', 'm15']: timeframe = '15m'
 
         df = fetch_stock_history_multi_tf(stock_code, timeframe=timeframe)
         
@@ -598,7 +592,6 @@ def telegram_polling():
                         chat_id = cb["message"]["chat"]["id"]
                         cb_data = cb["data"]
                         
-                        # LANGSUNG KONFIRMASI (ACK) TELEGRAM SEBELUM PROSES LAIN DILAKUKAN
                         try:
                             requests.post(
                                 f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery", 
@@ -609,12 +602,15 @@ def telegram_polling():
                             pass
                         
                         if cb_data.startswith("chart_"):
-                            _, sym, tf = cb_data.split("_")
-                            req_key = f"{chat_id}_{sym.upper()}_{tf}"
-                            
-                            if req_key not in PROCESSING_CHARTS:
-                                send_reply(chat_id, f"📊 *Generating chart {sym.upper()}...*")
-                                threading.Thread(target=process_chart_request, args=(chat_id, sym.upper(), tf)).start()
+                            parts = cb_data.split("_")
+                            if len(parts) >= 3:
+                                sym = parts[1].upper()
+                                tf = parts[2].lower()
+                                req_key = f"{chat_id}_{sym}_{tf}"
+                                
+                                if req_key not in PROCESSING_CHARTS:
+                                    send_reply(chat_id, f"📊 *Generating chart {sym}...*")
+                                    threading.Thread(target=process_chart_request, args=(chat_id, sym, tf)).start()
 
         except Exception:
             time.sleep(2)
