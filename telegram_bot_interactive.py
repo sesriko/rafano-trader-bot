@@ -68,10 +68,6 @@ class AsyncMarketDataProvider:
 
     @staticmethod
     def get_history_sync(ticker: str, limit: int = 250) -> Optional[pd.DataFrame]:
-        """
-        Mengambil riwayat harga OHLCV dengan validasi minimal 200 baris (untuk EMA 200).
-        Prioritas utama: Arjum API. Fallback cadangan: yfinance.
-        """
         ticker_upper = ticker.upper()
         
         # 1. Coba via Arjum API
@@ -225,16 +221,12 @@ def calculate_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
 async def build_complete_signal_async(ticker: str) -> Optional[Tuple[CompleteSignal, io.BytesIO]]:
     ticker = ticker.upper()
-    
-    # Ambil data historis secara sinkron/fallback terlebih dahulu
     df = AsyncMarketDataProvider.get_history_sync(ticker, limit=250)
     if df is None or df.empty or len(df) < 50:
         logger.warning("Data historis untuk %s tidak mencukupi.", ticker)
         return None
         
-    # Ambil data market intelligence secara paralel (Async)
     market_data = await AsyncMarketDataProvider.fetch_all_market_data(ticker)
-    
     df = calculate_technical_indicators(df)
     latest = df.iloc[-1]
     
@@ -257,7 +249,6 @@ async def build_complete_signal_async(ticker: str) -> Optional[Tuple[CompleteSig
     company_name = analysis_data.get("company_name", ticker)
     last_date = df.index[-1].strftime("%d %b %Y")
     
-    # Scoring Engine
     trend_score = 20 if price > ema_200 else 0
     momentum_score = 15 if 50 <= rsi <= 75 else 5
     volume_score = 15 if rel_vol > 1.2 else 0
@@ -291,7 +282,7 @@ async def build_complete_signal_async(ticker: str) -> Optional[Tuple[CompleteSig
 
 
 # ============================================================
-# 5. TELEGRAM SENDER MODULE (ASYNC)
+# 5. TELEGRAM SENDER MODULE & ASYNC POLLING LOOP
 # ============================================================
 
 async def send_rafano_signal_to_telegram(ticker: str, chat_id: str = DEFAULT_CHAT_ID):
@@ -350,5 +341,54 @@ async def send_rafano_signal_to_telegram(ticker: str, chat_id: str = DEFAULT_CHA
         logger.error("Error koneksi ke Telegram API: %s", e)
         return False
 
-# Contoh cara menjalankan fungsi async:
-# asyncio.run(send_rafano_signal_to_telegram("BBCA"))
+async def send_text_message(chat_id: str, text: str):
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    async with aiohttp.ClientSession() as session:
+        await session.post(url, json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"})
+
+async def main_telegram_bot():
+    logger.info("🤖 Rafano Trader Bot V9.3 Berjalan dan Mendengarkan Perintah Telegram...")
+    last_update_id = 0
+    
+    async with aiohttp.ClientSession() as session:
+        while True:
+            try:
+                url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates?offset={last_update_id + 1}&timeout=30"
+                async with session.get(url, timeout=35) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if data.get("ok") and data.get("result"):
+                            for update in data["result"]:
+                                last_update_id = update["update_id"]
+                                
+                                if "message" in update and "text" in update["message"]:
+                                    msg = update["message"]
+                                    c_id = msg["chat"]["id"]
+                                    text = msg["text"].strip()
+                                    
+                                    if text.lower() in ["/start", "/help"]:
+                                        help_text = (
+                                            "🤖 *RAFANO TRADER BOT (V9.3)*\n\n"
+                                            "Ketik perintah berikut untuk melihat analisis & chart:\n"
+                                            "• `/oke <kode_saham>`\n"
+                                            "  _Contoh:_ `/oke BBCA` atau `/oke ASII`"
+                                        )
+                                        await send_text_message(c_id, help_text)
+                                        
+                                    elif text.lower().startswith("/oke ") or text.lower().startswith("/c "):
+                                        parts = text.split()
+                                        if len(parts) >= 2:
+                                            ticker = parts[1].upper()
+                                            await send_text_message(c_id, f"🔍 *Menganalisis & merender chart {ticker}... Mohon tunggu.*")
+                                            await send_rafano_signal_to_telegram(ticker, chat_id=str(c_id))
+                                        else:
+                                            await send_text_message(c_id, "⚠️ Format salah. Gunakan: `/oke <kode_saham>` (Contoh: `/oke BBCA`)")
+            except Exception as e:
+                logger.error(f"Polling loop error: {e}")
+                await asyncio.sleep(3)
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main_telegram_bot())
+    except KeyboardInterrupt:
+        logger.info("Bot dihentikan manual.")
