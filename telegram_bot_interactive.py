@@ -57,7 +57,6 @@ class AsyncMarketDataProvider:
             "financials": f"{ARJUM_BASE_URL}/financial-statements/{ticker_upper}?report_type=INCOME_STATEMENT&period=quarterly&limit=4",
             "insiders": f"{ARJUM_BASE_URL}/insiders/{ticker_upper}?page=1&limit=5",
             "history": f"{ARJUM_BASE_URL}/history/{ticker_upper}?limit=250&frame=daily",
-            # 3 Poin Penguat Data Tambahan Baru
             "foreign_flow": f"{ARJUM_BASE_URL}/foreign-flow/{ticker_upper}",
             "broker_summary": f"{ARJUM_BASE_URL}/broker-summary/{ticker_upper}",
             "bandar_volume": f"{ARJUM_BASE_URL}/bandar-volume/{ticker_upper}"
@@ -153,7 +152,7 @@ async def fetch_active_watchlist_300() -> list:
 
 
 # ============================================================
-# 2. DATA STRUCTURE (EXPANDED WITH 3 NEW METRICS)
+# 2. DATA STRUCTURE
 # ============================================================
 
 @dataclass
@@ -191,7 +190,7 @@ def generate_oke_saham_chart(df: pd.DataFrame, ticker: str, company_name: str, l
     df['EMA_13'] = df['close'].ewm(span=13, adjust=False).mean()
     df['EMA_20'] = df['close'].ewm(span=20, adjust=False).mean()
     df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
-    df['EMA_200'] = df['close'].ewm(span=200, adjust=False).mean() # Major Trend: 200
+    df['EMA_200'] = df['close'].ewm(span=200, adjust=False).mean() # Major Trend: 200 (Sesuai instruksi)
     
     custom_style = mpf.make_mpf_style(
         base_mpf_style='nightclouds',
@@ -285,7 +284,6 @@ async def build_complete_signal_async(ticker: str) -> Optional[Tuple[CompleteSig
     financials_data = market_data.get("financials") or {}
     insiders_data = market_data.get("insiders") or {}
     
-    # 3 Poin Ekstra Data API Arjum Baru
     foreign_data = market_data.get("foreign_flow") or {}
     broker_sum_data = market_data.get("broker_summary") or {}
     bandar_vol_data = market_data.get("bandar_volume") or {}
@@ -305,7 +303,6 @@ async def build_complete_signal_async(ticker: str) -> Optional[Tuple[CompleteSig
     momentum_score = 15 if 50 <= rsi <= 75 else 5
     volume_score = 15 if rel_vol > 1.2 else 0
     
-    # Pembobotan Nilai Ditambah dari 3 Analisis Baru
     arjum_score = (
         (10 if broker_status == "ACCUMULATION" else 0) + 
         (5 if seasonal_trend == "BULLISH" else 0) + 
@@ -433,7 +430,8 @@ async def main_telegram_bot():
     logger.info("🤖 Rafano Trader Bot V9.3 Berjalan (Manual Command + 15-Min Auto Scan)...")
     last_update_id = 0
     
-    async asyncio.create_task(automated_watchlist_scanner())
+    # Perbaikan Syntax Error (tanpa kata 'async' di depan create_task)
+    asyncio.create_task(automated_watchlist_scanner())
     
     async with aiohttp.ClientSession() as session:
         while True:
