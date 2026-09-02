@@ -56,6 +56,10 @@ LAST_RESET_DATE = ""
 # Lock untuk Thread Safety pembuatan chart Matplotlib
 CHART_LOCK = threading.Lock()
 
+# Set untuk mencegah duplikasi request chart bersamaan
+PROCESSING_CHARTS = set()
+CHART_REQ_LOCK = threading.Lock()
+
 def filter_signals_with_cooldown(signals):
     global LAST_RESET_DATE, LAST_SENT_SIGNALS
     current_time = time.time()
@@ -242,7 +246,7 @@ def check_volume_spike_signal(df, symbol, threshold_multiplier=2.0, min_value_tr
 # CHART GENERATOR (RAFANO TRADER DESIGN)
 # ==========================================
 def generate_pro_chart(df, symbol="BIPI", timeframe="1d", sector_info="Astrindo Nusantara Infrastruktur Tbk. | Energy, Coal", output_filename="chart_output.png"):
-    with CHART_LOCK:  # Thread safety agar tidak tumpang tindih saat menggambar
+    with CHART_LOCK:
         try:
             col_map = {c: str(c).lower().strip() for c in df.columns}
             df.rename(columns=col_map, inplace=True)
@@ -263,7 +267,6 @@ def generate_pro_chart(df, symbol="BIPI", timeframe="1d", sector_info="Astrindo 
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
 
-            # Hitung Indikator Utama
             df['EMA13'] = df['Close'].ewm(span=13, adjust=False).mean()
             df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
             df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
@@ -272,11 +275,9 @@ def generate_pro_chart(df, symbol="BIPI", timeframe="1d", sector_info="Astrindo 
             df['V1'] = df['Volume'].rolling(20, min_periods=1).mean()
             df['V2'] = df['Volume'].rolling(50, min_periods=1).mean()
 
-            # Hitung VSA & NBSA secara eksplisit
             df, buy_ratios = calculate_vsa_metrics(df)
             df['NBSA'] = df['Net_Val_VSA']
             
-            net_5d_vol = df['Net_Vol_VSA'].tail(5).sum()
             net_vol_today = df['Net_Vol_VSA'].iloc[-1]
             
             if 'MM' not in df.columns:
@@ -309,7 +310,6 @@ def generate_pro_chart(df, symbol="BIPI", timeframe="1d", sector_info="Astrindo 
             x_indices = np.arange(len(df))
             color_up, color_down = '#00ff00', '#ff0000'
 
-            # Render Candlesticks
             for i in range(len(df)):
                 open_p, high_p, low_p, close_p = df['Open'].iloc[i], df['High'].iloc[i], df['Low'].iloc[i], df['Close'].iloc[i]
                 if close_p >= open_p:
@@ -326,13 +326,11 @@ def generate_pro_chart(df, symbol="BIPI", timeframe="1d", sector_info="Astrindo 
                     rect = patches.Rectangle((i - 0.35, body_bottom), 0.7, body_height, linewidth=1.0, edgecolor=color_down, facecolor=color_down)
                     ax_main.add_patch(rect)
 
-            # Plot Garis EMA
             ax_main.plot(x_indices, df['EMA13'], color='#ffff00', linewidth=1.1, label='EMA 13')
             ax_main.plot(x_indices, df['EMA20'], color='#ff0000', linewidth=1.1, label='EMA 20')
             ax_main.plot(x_indices, df['EMA50'], color='#ffffff', linewidth=1.2, label='EMA 50')
             ax_main.plot(x_indices, df['EMA200'], color='#a020f0', linewidth=1.5, label='EMA 200')
 
-            # Header Atas
             fig.text(0.03, 0.960, f"{symbol} :    {safe_int(last_close)} ({change_pct:+.2f}%)", color='#ffff00', fontsize=14, fontweight='bold')
             fig.text(0.03, 0.938, f"{sector_info}", color='#888888', fontsize=8)
             fig.text(0.50, 0.960, "RAFANO TRADER", color='#ffffff', fontsize=15, fontweight='bold', ha='center')
@@ -343,7 +341,6 @@ def generate_pro_chart(df, symbol="BIPI", timeframe="1d", sector_info="Astrindo 
             sub_info_ohlc = f"High:{safe_int(last_high)}  Low:{safe_int(last_low)}  Open:{safe_int(last_open)}  Volume:{safe_int(last_vol):,}  V1:{safe_int(df['V1'].iloc[-1]):,}"
             fig.text(0.03, 0.920, sub_info_ohlc, color='#00ffff', fontsize=8, fontfamily='monospace')
 
-            # Right Price Tag
             last_ema200 = df['EMA200'].iloc[-1]
             ax_main.text(1.005, last_ema200, f" EMA 200 ", transform=ax_main.get_yaxis_transform(),
                          color='white', backgroundcolor='#a020f0', fontsize=7, fontweight='bold', va='center', clip_on=False)
@@ -351,7 +348,6 @@ def generate_pro_chart(df, symbol="BIPI", timeframe="1d", sector_info="Astrindo 
                          color='black', backgroundcolor='#00ff00' if last_close >= last_open else '#ff0000', 
                          fontsize=7, fontweight='bold', va='center', clip_on=False)
 
-            # Panel Volume Stack
             ax_vol.bar(x_indices, df['Vol_Sell'], color='#ff0000', width=0.8)
             ax_vol.bar(x_indices, df['Vol_Buy'], bottom=df['Vol_Sell'], color='#00ff00', width=0.8)
             ax_vol.plot(x_indices, df['V1'], color='#ffffff', linewidth=0.8)
@@ -360,7 +356,6 @@ def generate_pro_chart(df, symbol="BIPI", timeframe="1d", sector_info="Astrindo 
             vol_info_text = f"Buy Vol = {buy_pct}%   Sell Vol = {100-buy_pct}%   Net Vol = {safe_int(net_vol_today):,}"
             ax_vol.text(0.01, 0.80, vol_info_text, transform=ax_vol.transAxes, color='#ffff00', fontsize=8, fontweight='bold')
 
-            # Panel NBSA (Tampilan Diperbaiki)
             nbsa_colors = ['#00ffff' if val >= 0 else '#ff0000' for val in df['NBSA']]
             ax_nbsa.bar(x_indices, df['NBSA'], color=nbsa_colors, width=0.6)
             
@@ -371,13 +366,11 @@ def generate_pro_chart(df, symbol="BIPI", timeframe="1d", sector_info="Astrindo 
             
             ax_nbsa.text(0.01, 0.70, f"NBSA Rp. {nbsa_str} ({nbsa_val_pct:.1f}%)", transform=ax_nbsa.transAxes, color='#ffff00', fontsize=8, fontweight='bold')
 
-            # Panel Market Maker
             mm_colors = ['#ffffff' if val >= 0 else '#888888' for val in df['MM']]
             ax_mm.bar(x_indices, df['MM'], color=mm_colors, width=0.4)
             ax_mm.text(0.01, 0.70, "Market Maker Momentum", transform=ax_mm.transAxes, color='#ffff00', fontsize=8)
             ax_mm.set_ylim(-200, 200)
 
-            # Axis Datetime
             step = max(1, len(df) // 7)
             ax_mm.set_xticks(x_indices[::step])
             if isinstance(df.index, pd.DatetimeIndex):
@@ -533,26 +526,36 @@ def broadcast_screening_results(signals, title_header, tf_code, target_chat_id=N
         send_reply(target_chat_id, current_msg, reply_markup={"inline_keyboard": inline_keyboard})
 
 def process_chart_request(chat_id, stock_code, timeframe="1d"):
-    timeframe = timeframe.lower().strip()
-    if timeframe in ['d', 'day', 'daily', '1d']: timeframe = '1d'
-    if timeframe in ['5', '5mi', 'm5']: timeframe = '5m'
-    if timeframe in ['15', '15mi', 'm15']: timeframe = '15m'
+    req_key = f"{chat_id}_{stock_code}_{timeframe}"
+    with CHART_REQ_LOCK:
+        if req_key in PROCESSING_CHARTS:
+            return  # Abaikan request jika saham & timeframe yang sama sedang diproses
+        PROCESSING_CHARTS.add(req_key)
 
-    df = fetch_stock_history_multi_tf(stock_code, timeframe=timeframe)
-    
-    if df is not None and not df.empty and len(df) >= 20:
-        col_map = {'open':'Open', 'high':'High', 'low':'Low', 'close':'Close', 'volume':'Volume'}
-        df.rename(columns=lambda x: col_map.get(str(x).lower().strip(), x), inplace=True)
+    try:
+        timeframe = timeframe.lower().strip()
+        if timeframe in ['d', 'day', 'daily', '1d']: timeframe = '1d'
+        if timeframe in ['5', '5mi', 'm5']: timeframe = '5m'
+        if timeframe in ['15', '15mi', 'm15']: timeframe = '15m'
+
+        df = fetch_stock_history_multi_tf(stock_code, timeframe=timeframe)
         
-        output_img = f"chart_{stock_code}_{timeframe}_{int(time.time())}.png"
-        chart_file = generate_pro_chart(df, symbol=stock_code.upper(), timeframe=timeframe, sector_info=f"{stock_code.upper()} | IHSG", output_filename=output_img)
-        
-        if chart_file and os.path.exists(chart_file):
-            caption = f"📊 *Chart {stock_code.upper()} ({timeframe.upper()})*"
-            send_photo_reply(chat_id, chart_file, caption=caption)
-            os.remove(chart_file)
-    else:
-        send_reply(chat_id, f"❌ Data saham untuk *{stock_code.upper()}* tidak ditemukan atau data kurang memadai.")
+        if df is not None and not df.empty and len(df) >= 20:
+            col_map = {'open':'Open', 'high':'High', 'low':'Low', 'close':'Close', 'volume':'Volume'}
+            df.rename(columns=lambda x: col_map.get(str(x).lower().strip(), x), inplace=True)
+            
+            output_img = f"chart_{stock_code}_{timeframe}_{int(time.time())}.png"
+            chart_file = generate_pro_chart(df, symbol=stock_code.upper(), timeframe=timeframe, sector_info=f"{stock_code.upper()} | IHSG", output_filename=output_img)
+            
+            if chart_file and os.path.exists(chart_file):
+                caption = f"📊 *Chart {stock_code.upper()} ({timeframe.upper()})*"
+                send_photo_reply(chat_id, chart_file, caption=caption)
+                os.remove(chart_file)
+        else:
+            send_reply(chat_id, f"❌ Data saham untuk *{stock_code.upper()}* tidak ditemukan atau data kurang memadai.")
+    finally:
+        with CHART_REQ_LOCK:
+            PROCESSING_CHARTS.discard(req_key)
 
 # ==========================================
 # BOT LISTENER & SCREENER LOOP
@@ -579,8 +582,10 @@ def telegram_polling():
                             if len(parts) >= 2:
                                 sym = parts[1].upper()
                                 tf = parts[2].lower() if len(parts) >= 3 else "1d"
-                                send_reply(chat_id, f"📊 *Generating chart {sym}...*")
-                                threading.Thread(target=process_chart_request, args=(chat_id, sym, tf)).start()
+                                req_key = f"{chat_id}_{sym}_{tf}"
+                                if req_key not in PROCESSING_CHARTS:
+                                    send_reply(chat_id, f"📊 *Generating chart {sym}...*")
+                                    threading.Thread(target=process_chart_request, args=(chat_id, sym, tf)).start()
                         elif text.lower() == "/scan":
                             send_reply(chat_id, "🔍 *Menjalankan Manual Screening IHSG...*")
                             signals = run_scan_process_custom_tf("1d")
@@ -593,13 +598,24 @@ def telegram_polling():
                         chat_id = cb["message"]["chat"]["id"]
                         cb_data = cb["data"]
                         
-                        # LANGSUNG JAWAB CALLBACK AGAR TELEGRAM TIDAK TERUS MENGIRIM KEMBALI EVENT KLIK
-                        requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery", json={"callback_query_id": cb_id})
+                        # LANGSUNG KONFIRMASI (ACK) TELEGRAM SEBELUM PROSES LAIN DILAKUKAN
+                        try:
+                            requests.post(
+                                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery", 
+                                json={"callback_query_id": cb_id}, 
+                                timeout=3
+                            )
+                        except Exception:
+                            pass
                         
                         if cb_data.startswith("chart_"):
                             _, sym, tf = cb_data.split("_")
-                            send_reply(chat_id, f"📊 *Generating chart {sym.upper()}...*")
-                            threading.Thread(target=process_chart_request, args=(chat_id, sym, tf)).start()
+                            req_key = f"{chat_id}_{sym.upper()}_{tf}"
+                            
+                            if req_key not in PROCESSING_CHARTS:
+                                send_reply(chat_id, f"📊 *Generating chart {sym.upper()}...*")
+                                threading.Thread(target=process_chart_request, args=(chat_id, sym.upper(), tf)).start()
+
         except Exception:
             time.sleep(2)
 
