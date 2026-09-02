@@ -247,7 +247,7 @@ def check_volume_spike_signal(df, symbol, threshold_multiplier=2.0, min_value_tr
     return False, {}
 
 # ==========================================
-# CHART GENERATOR (DESAIN PRESISI OKE SAHAM)
+# CHART GENERATOR (RAFANO TRADER DESIGN)
 # ==========================================
 def generate_pro_chart(df, symbol="BIPI", timeframe="1d", sector_info="Astrindo Nusantara Infrastruktur Tbk. | Energy, Coal", output_filename="chart_output.png"):
     try:
@@ -283,9 +283,8 @@ def generate_pro_chart(df, symbol="BIPI", timeframe="1d", sector_info="Astrindo 
         net_5d_vol = df['Net_Vol_VSA'].tail(5).sum()
         net_vol_today = df['Net_Vol_VSA'].iloc[-1]
         
-        # NBSA & MM Data
-        if 'NBSA' not in df.columns:
-            df['NBSA'] = (df['Close'] - df['Open']) * df['Volume'] * 0.0001
+        # NBSA & MM Data Dinamis
+        df['NBSA'] = df['Net_Val_VSA']
         if 'MM' not in df.columns:
             df['MM'] = (df['Close'] - df['EMA50']) / df['EMA50'] * 1000 - 44.05
 
@@ -349,7 +348,6 @@ def generate_pro_chart(df, symbol="BIPI", timeframe="1d", sector_info="Astrindo 
         
         last_date_str = get_now_wib().strftime('%d %b %Y')
         fig.text(0.94, 0.965, f"Daily {last_date_str}", color='#ffffff', fontsize=10, fontweight='bold', ha='right')
-        
 
         sub_info_ohlc = f"High:{safe_int(last_high)}    Low:{safe_int(last_low)}    Open:{safe_int(last_open)}    Volume:{safe_int(last_vol):,}    V1:{safe_int(df['V1'].iloc[-1]):,}    V2:{safe_int(df['V2'].iloc[-1]):,}"
         fig.text(0.03, 0.930, sub_info_ohlc, color='#00ffff', fontsize=8.5, fontfamily='monospace')
@@ -390,10 +388,16 @@ def generate_pro_chart(df, symbol="BIPI", timeframe="1d", sector_info="Astrindo 
         vol_info_text = f"Buy Percent = {buy_pct}%   Sell Percent = {100-buy_pct}%   Net Vol = {safe_int(net_vol_today):,}   Net 5D = {safe_int(net_5d_vol):,}"
         ax_vol.text(0.01, 0.88, vol_info_text, transform=ax_vol.transAxes, color='#ffff00', fontsize=8, fontweight='bold')
 
-        # Panel NBSA
+        # Panel NBSA (Perhitungan Dinamis)
         nbsa_colors = ['#00ffff' if val >= 0 else '#ff0000' for val in df['NBSA']]
         ax_nbsa.bar(x_indices, df['NBSA'], color=nbsa_colors, width=0.6)
-        ax_nbsa.text(0.01, 0.75, "NBSA Rp. 33.87 Milyar   NBSA Value : 30.4%", transform=ax_nbsa.transAxes, color='#ffff00', fontsize=8)
+        
+        sum_nbsa = df['NBSA'].iloc[-1]
+        nbsa_str = format_large_number(sum_nbsa, show_sign=True)
+        total_val = (df['Close'] * df['Volume']).iloc[-1]
+        nbsa_val_pct = (abs(sum_nbsa) / total_val * 100) if total_val > 0 else 0.0
+        
+        ax_nbsa.text(0.01, 0.75, f"NBSA Rp. {nbsa_str}   NBSA Value : {nbsa_val_pct:.1f}%", transform=ax_nbsa.transAxes, color='#ffff00', fontsize=8)
 
         # Panel Market Maker
         mm_colors = ['#ffffff' if val >= 0 else '#888888' for val in df['MM']]
@@ -560,7 +564,7 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
     if timeframe in ['5', '5mi', 'm5']: timeframe = '5m'
     if timeframe in ['15', '15mi', 'm15']: timeframe = '15m'
 
-    send_reply(chat_id, f"📊 *Generating Chart {stock_code.upper()} ({timeframe.upper()})...*")
+    send_reply(chat_id, f"📊 *Generating chart {stock_code.upper()}...*")
     df = fetch_stock_history_multi_tf(stock_code, timeframe=timeframe)
     
     if df is not None and not df.empty and len(df) >= 20:
@@ -570,7 +574,7 @@ def process_chart_request(chat_id, stock_code, timeframe="1d"):
         output_img = f"chart_{stock_code}_{timeframe}.png"
         chart_file = generate_pro_chart(df, symbol=stock_code.upper(), timeframe=timeframe, sector_info=f"{stock_code.upper()} | IHSG", output_filename=output_img)
         
-        caption = f"📊 *OKE SAHAM CHART: {stock_code.upper()} ({timeframe.upper()})*\n_Generated at {get_now_wib().strftime('%H:%M:%S WIB')}_"
+        caption = f"📊 *chart: {stock_code.upper()}*"
         send_photo_reply(chat_id, chart_file, caption=caption)
         
         if os.path.exists(chart_file):
@@ -604,11 +608,6 @@ def telegram_polling():
                                 sym = parts[1].upper()
                                 tf = parts[2].lower() if len(parts) >= 3 else "1d"
                                 threading.Thread(target=process_chart_request, args=(chat_id, sym, tf)).start()
-                        elif text.lower().startswith("/oke "):
-                            parts = text.split()
-                            if len(parts) >= 2:
-                                sym = parts[1].upper()
-                                threading.Thread(target=process_chart_request, args=(chat_id, sym, "1d")).start()
                         elif text.lower() == "/scan":
                             send_reply(chat_id, "🔍 *Menjalankan Manual Screening IHSG...*")
                             signals = run_scan_process_custom_tf("1d")
