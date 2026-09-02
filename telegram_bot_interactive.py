@@ -1,5 +1,5 @@
 # ============================================================
-# RAFANO TRADER V9.9 - FULL INTEGRATED BOT (FIXED API PARSING)
+# RAFANO TRADER V9.10 - FULL INTEGRATED BOT (WITH DEBUG LOGGING)
 # ============================================================
 
 import os
@@ -35,7 +35,7 @@ def _get_arjum_headers() -> Dict[str, str]:
     }
 
 # ============================================================
-# 1. MARKET DATA PROVIDER
+# 1. MARKET DATA PROVIDER WITH DEBUG LOGGING
 # ============================================================
 
 class MarketDataProvider:
@@ -43,8 +43,14 @@ class MarketDataProvider:
     async def _fetch_json(session: aiohttp.ClientSession, url: str) -> Optional[Dict[str, Any]]:
         try:
             async with session.get(url, headers=_get_arjum_headers(), timeout=10) as response:
+                text_data = await response.text()
                 if response.status == 200:
-                    return await response.json()
+                    res_json = await response.json()
+                    # DEBUG: Mencetak respons mentah ke terminal untuk pengecekan data API
+                    print(f"DEBUG URL [{url}] RESPONSE: {res_json}")
+                    return res_json
+                else:
+                    print(f"DEBUG URL [{url}] STATUS CODE: {response.status}, TEXT: {text_data}")
         except Exception as e:
             logger.debug("Fetch error %s: %s", url, e)
         return None
@@ -463,7 +469,7 @@ def main():
     scheduler.add_job(run_eod_market_scanner, 'cron', hour=19, minute=0, args=[app])
     scheduler.start()
     
-    logger.info("Rafano Trader Bot V9.9 is running...")
+    logger.info("Rafano Trader Bot V9.10 is running...")
     app.run_polling()
 
 if __name__ == "__main__":
