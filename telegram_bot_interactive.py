@@ -1,751 +1,441 @@
 import os
-import time
+import io
 import logging
-import datetime
-import threading
-import requests
-import pytz
-import numpy as np
+import asyncio
+from datetime import datetime, time
 import pandas as pd
+import numpy as np
+import yfinance as yf
+import requests
+
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
 import matplotlib.gridspec as gridspec
-from concurrent.futures import ThreadPoolExecutor
+from matplotlib.patches import Rectangle
 
-try:
-    import yfinance as yf
-except ImportError:
-    yf = None
-
-# ==========================================
-# KONFIGURASI ZONA WAKTU (WIB)
-# ==========================================
-TIMEZONE_WIB = pytz.timezone('Asia/Jakarta')
-
-def get_now_wib():
-    return datetime.datetime.now(TIMEZONE_WIB)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+)
 
 # ==========================================
-# FILTER LOGS TERMINAL
+# 1. KONFIGURASI & LOGGING
 # ==========================================
-logging.getLogger("yfinance").setLevel(logging.CRITICAL)
-logging.getLogger("urllib3").setLevel(logging.CRITICAL)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-# ==========================================
-# KONFIGURASI BOT TELEGRAM & API
-# ==========================================
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8833563003:AAGSx750u_QXWpr91sd3yuD6LcnMXtWWrxQ")
-TARGET_CHAT_ID = os.getenv("TARGET_CHAT_ID", "5660874676")
+TELEGRAM_CHAT_ID = os.getenv("TARGET_CHAT_ID", "5660874676")
 
 ARJUM_API_BASE_URL = "https://stock.arjum.com/api"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 
-SCREENER_ACTIVE = True
+COOLDOWN_SECONDS = 3600
+signal_cooldowns = {}
 
-# ==========================================
-# COOLDOWN TRACKER (60 MENIT)
-# ==========================================
-LAST_SENT_SIGNALS = {}
-COOLDOWN_SECONDS = 3600  
-LAST_RESET_DATE = ""
-
-def filter_signals_with_cooldown(signals):
-    global LAST_RESET_DATE, LAST_SENT_SIGNALS
-    current_time = time.time()
-    today_str = get_now_wib().strftime('%Y-%m-%d')
-
-    if LAST_RESET_DATE != today_str:
-        LAST_SENT_SIGNALS.clear()
-        LAST_RESET_DATE = today_str
-
-    filtered_list = []
-    for sig in signals:
-        sym = sig['symbol']
-        last_sent = LAST_SENT_SIGNALS.get(sym, 0)
-
-        if (current_time - last_sent) >= COOLDOWN_SECONDS:
-            filtered_list.append(sig)
-            LAST_SENT_SIGNALS[sym] = current_time
-
-    return filtered_list
-
-# Universe 300 Saham IHSG
-TOP_300_IHSG = [
-    "ACES", "ADHI", "ADMR", "ADRO", "AGRO", "AGRS", "AHAP", "AISA", "AKRA", "ALDO", 
-    "AMAR", "AMFG", "AMMM", "AMMN", "AMMS", "AMRT", "ANDI", "ANJT", "ANTM", "APEX", 
-    "APIC", "APLN", "ARCI", "ARKO", "ARTO", "ASBI", "ASGR", "ASHA", "ASII", "ASRI", 
-    "AUTO", "AVIA", "AXIO", "BABP", "BACA", "BALI", "BANK", "BAPA", "BBCA", "BBHI", 
-    "BBKP", "BBLD", "BBMD", "BBNI", "BBRI", "BBRM", "BBTN", "BBYB", "BCIC", "BDMN", 
-    "BEST", "BFIN", "BHIT", "BIKE", "BIPI", "BIPP", "BIRD", "BISI", "BJBR", "BJTM", 
-    "BKSL", "BLUE", "BMAS", "BMBL", "BMHS", "BMRI", "BMTR", "BNBR", "BNGA", "BNII", 
-    "BNLI", "BOLT", "BRAM", "BRMS", "BRPT", "BSDE", "BSIM", "BSSR", "BSWD", "BTEC", 
-    "BTON", "BUKA", "BULL", "BUMI", "BVIC", "BWPT", "BYAN", "CARE", "CARS", "CASA", 
-    "CASS", "CEKA", "CENT", "CFIN", "CINT", "CITA", "CITY", "CLPI", "CMNP", "CMPP", 
-    "CMRY", "CNTX", "COAL", "CPIN", "CPRI", "CPRO", "CRAB", "CSAP", "CSRA", "CTBN", 
-    "CTRA", "DART", "DEWA", "DGIK", "DIGI", "DILD", "DIVA", "DKFT", "DLTA", "DMAS", 
-    "DNAR", "DNET", "DPNS", "DRMA", "DSNG", "DUTI", "DVLA", "ECII", "ELSA", "ELTY", 
-    "EMTK", "ENRG", "ERAA", "ESSA", "FASW", "FILM", "FIRE", "FPNI", "FUTR", "GDST", 
-    "GEMS", "GIAA", "GJTL", "GNKF", "GOTO", "GPRA", "GRPH", "GSMF", "GTBO", "GWSA", 
-    "GZCO", "HAIS", "HATM", "HDIT", "HEAL", "HERO", "HEXA", "HILL", "HITS", "HMSP", 
-    "HOKI", "HOME", "HOPE", "HRUM", "IATA", "IBFN", "IBOS", "ICBP", "ICON", "IDPR", 
-    "IFSH", "IGAR", "IIKP", "IKAI", "IKBI", "IMPC", "INAF", "INAI", "INCF", "INCI", 
-    "INDF", "INKP", "INPC", "INPP", "INTP", "IPCC", "IPPE", "IRRA", "ISAT", "ISSP", 
-    "ITMG", "JARR", "JECC", "JAST", "JIHD", "JKON", "JSPT", "JPFA", "JRPT", "JSMR", 
-    "JTEX", "KAEF", "KAST", "KBLI", "KBLM", "KDSI", "KEEN", "KIJA", "KKGI", "KLBF", 
-    "KMDS", "KMTR", "KOBX", "KOPI", "KPIG", "KRAS", "LAJU", "LPCK", "LPKR", "LPLI", 
-    "LPPF", "LTLS", "MAHA", "MAPA", "MAPI", "MARK", "MASB", "MBAP", "MBMA", "MBTO", 
-    "MCOR", "MDKA", "MEDC", "MGRO", "MLPT", "MMLP", "MNCN", "MPOW", "MPPA", "MRAT", 
-    "MSIN", "MTDL", "MTLA", "MYOR", "NANO", "NCKL", "NELI", "NICK", "NIKL", "NISP", 
-    "NSIC", "OASA", "OKAS", "OMRE", "PALM", "PANI", "PANR", "PBSD", "PBID", "PGLI", 
-    "PGAS", "PGUN", "PMMP", "PUDP", "PNBS", "PNIN", "PNLF", "POLI", "POLL", "POLY", 
-    "PORT", "POWR", "PPGL", "PPRE", "PTBA", "PTPP", "PTRO", "PWON", "PYFA", "RAJA", 
-    "RALS", "RANC", "RBMS", "RDTX", "RELI", "RICY", "RIGS", "RMKO", "ROTI", "SAFE", 
-    "SAMF", "SAME", "SAMR", "SBAT", "SCCO", "SCMA", "SDMU", "SFAN", "SGER", "SGRO", 
-    "SILO", "SIMP", "SINO", "SIPD", "SKLT", "SMAR", "SMDM", "SMDR", "SMGR", "SMRA", 
-    "SMOT", "SMSM", "SOCI", "SPTO", "SRTG", "SSIA", "SSMS", "STAA", "TAPG", "TBLA", 
-    "TBIG", "TEBE", "TFCO", "TINU", "TINS", "TKIM", "TLDN", "TLKM", "TMAS", "TOBA", 
-    "TPIA", "TRIM", "TRIS", "TRST", "TRUK", "TSPC", "TOTO", "UANG", "UCID", "ULTJ", 
-    "UNIC", "UNIQ", "UNTR", "UNVR", "VICI", "VINS", "VKTR", "VRNA", "WAPO", "WEGE", 
-    "WIFI", "WIIM", "WINS", "WIRT", "WOOD", "WSBP", "WSIH", "WTON", "YPAS", "YULE", 
-    "ZBRA", "ZINC"
+# Daftar 300 Saham IHSG
+TICKERS = [
+    "AALI", "ABDA", "ABMM", "ACES", "ACST", "ADEL", "ADMF", "ADMG", "ADRO", "AGAR",
+    "AGII", "AGRO", "AGRS", "AHAP", "AIMS", "AISA", "AKRA", "AKSI", "ALDO", "ALKA",
+    "ALMI", "ALTO", "AMAR", "AMFG", "AMIN", "AMRT", "ANDI", "ANJT", "ANTM", "APIC",
+    "APII", "APLI", "APLN", "ARCI", "ARGO", "ARKA", "ARMY", "ARTO", "ASBI", "ASDM",
+    "ASGR", "ASII", "ASJT", "ASMI", "ASRI", "ASRM", "ASSA", "ATIC", "AUTO", "AVIA",
+    "BABP", "BACA", "BAJA", "BALI", "BANK", "BAPA", "BATA", "BBCA", "BBHI", "BBKP",
+    "BBLD", "BBMD", "BBNI", "BBRI", "BBSB", "BBTN", "BBYB", "BCIC", "BCIP", "BDMN",
+    "BEKS", "BEST", "BFIN", "BGTG", "BHAT", "BHIT", "BIKA", "BINA", "BIPI", "BIRD",
+    "BISDE", "BISC", "BJBR", "BJTM", "BKDP", "BKSL", "BLAZ", "BLTZ", "BLUE", "BMAS",
+    "BMHS", "BMRI", "BMTR", "BNBR", "BNGA", "BNII", "BNLI", "BOBA", "BOLA", "BOLT",
+    "BOSS", "BPFI", "BPII", "BRPT", "BSDE", "BSIM", "BSWD", "BTEK", "BTPS", "BSSR",
+    "BREN", "BRMS", "BRIS", "BUKA", "BUKK", "BULL", "BUMI", "BVIC", "BWPT", "BYAN",
+    "CAKK", "CAMP", "CASA", "CASH", "CASS", "CEKA", "CENT", "CFIN", "CINT", "CITA",
+    "CITY", "CLPI", "CMNP", "CMPP", "CNKO", "CNTX", "COWL", "CPIN", "CPRI", "CPRO",
+    "CSAP", "CSIS", "CSRA", "CTBN", "CTRA", "CTRP", "DART", "DEWA", "DEXA", "DFAM",
+    "DGIK", "DIGI", "DILD", "DIVA", "DKFT", "DLTA", "DMAS", "DNAR", "DNET", "DOID",
+    "DPNS", "DSFI", "DSNG", "DSSA", "DUTI", "DVLA", "DWGL", "EAST", "ECII", "ENRG",
+    "EPMT", "ERAA", "ERTX", "ESSA", "ESTI", "ETWA", "EXCL", "FAST", "FASW", "FISH",
+    "FPNI", "FUTR", "GAAA", "GDST", "GEMA", "GGRM", "GIAA", "GJTL", "GLOB", "GLVA",
+    "GOOD", "GOTO", "GPRA", "GSMF", "GTBO", "GWSA", "GZCO", "HATM", "HDFA", "HEAL",
+    "HERO", "HEXA", "HITS", "HMSP", "HOKI", "HOME", "HOPE", "HRUM", "IATA", "IBFN",
+    "IBST", "ICBP", "ICON", "IDPR", "IGAR", "IIKP", "IKAI", "IKBI", "IMPC", "INAF",
+    "INCF", "INCI", "INDF", "INDY", "INKP", "INPC", "INPP", "INRU", "INTA", "INTD",
+    "INTP", "IPCC", "IPCM", "IPOL", "ISAT", "ISSP", "ITMA", "ITMG", "JAST", "JAWA",
+    "JECC", "JKSW", "JPFA", "JRPT", "JSMR", "JSPT", "JTPE", "KAEF", "KARW", "KBLI",
+    "KBLM", "KBAG", "KDSI", "KIAS", "KICI", "KIJA", "KKGI", "KLBF", "KMTR", "KOBX",
+    "KOIN", "KONI", "KOPI", "KPAL", "KPAS", "KPEI", "KPIG", "KRAS", "KREN", "LPCK",
+    "LPIN", "LPKR", "LPLI", "LPPF", "LTLS", "LUXI", "MAIN", "MAPA", "MAPI", "MARK",
+    "MASA", "MAYA", "MBAP", "MBSS", "MDLN", "MEDC", "METR", "MFIN", "MGNA", "MICE",
+    "MIDI", "MIKA", "MLBI", "MLIA", "MLPT", "MMSD", "MNCN", "MPPA", "MPMX", "MTDL",
+    "MTLA", "MYOR", "NATO", "NCLK", "NETV", "NIKL", "NISP", "PANR", "PBRX", "PGAS",
+    "PGJO", "PNBN", "PNBS", "PNIN", "PNLF", "POLY", "POWR", "PRDA", "PTBA", "PTPP",
+    "PSSI", "PWON", "PYFA", "RAJA", "RALS", "RANC", "RBMS", "RDMD", "RELI", "RICY",
+    "RIGS", "RISE", "ROTI", "SAFE", "SAME", "SAMF", "SAPX", "SCCO", "SCMA", "SDPC",
+    "SGER", "SGRO", "SHID", "SILO", "SIMP", "SINO", "SIPD", "SKBM", "SKLT", "SMBR",
+    "SMDR", "SMGR", "SMKL", "SMMA", "SMRA", "SMSM", "SOUL", "SPTO", "SRIL", "SRTG",
+    "SSMS", "SSUC", "STAA", "SUPR", "TALF", "TAPA", "TAPG", "TBIG", "TBLA", "TCID",
+    "TELE", "TFCO", "TFIN", "TLKM", "TMAS", "TMPO", "TNCA", "TOBA", "TOTAL", "TPIA",
+    "TPMA", "TROW", "TSPC", "TSRI", "TOTO", "UCID", "ULTJ", "UNIC", "UNIQ", "UNTR",
+    "UNVR", "URBN", "VBNI", "VRNA", "WAPO", "WEGE", "WIFI", "WIIM", "WIMD", "WINS",
+    "WIRT", "WMIC", "WOOD", "WOWS", "WSKT", "WTON", "YPAS", "YULE", "ZBRA"
 ]
 
 # ==========================================
-# HELPER FRAKSI HARGA IHSG & DETEKSI JAM BURSA
+# 2. HELPER UTAMA & DATA FETCHING
 # ==========================================
-def round_to_ihsg_fraction(price):
-    if pd.isna(price) or price <= 0:
-        return 0
-    price = float(price)
-    if price < 200:
-        tick = 1
-    elif price < 500:
-        tick = 2
-    elif price < 2000:
-        tick = 5
-    elif price < 5000:
-        tick = 10
-    else:
-        tick = 25
-    return int(round(price / tick) * tick)
-
-def safe_int(val, default=0):
-    try:
-        if pd.isna(val) or np.isinf(val):
-            return default
-        return int(val)
-    except Exception:
-        return default
-
-def format_large_number(val, show_sign=False):
-    if pd.isna(val) or val == 0:
-        return "0"
-    abs_val = abs(val)
-    sign = "+" if (show_sign and val > 0) else ("-" if val < 0 else "")
-    if abs_val >= 1_000_000_000:
-        return f"{sign}{abs_val / 1_000_000_000:.2f}B"
-    elif abs_val >= 1_000_000:
-        return f"{sign}{abs_val / 1_000_000:,.0f}M"
-    elif abs_val >= 1_000:
-        return f"{sign}{abs_val / 1_000:,.0f}K"
-    else:
-        return f"{sign}{val:,.0f}"
-
-def is_market_open():
-    """Validasi Sesi Perdagangan IHSG"""
-    now = get_now_wib()
-    weekday = now.weekday()
-    if weekday >= 5: # Sabtu (5) & Minggu (6) bursa tutup
+def is_market_open() -> bool:
+    now = datetime.now()
+    if now.weekday() >= 5:
         return False
-        
     current_time = now.time()
-    if weekday == 4: # Hari Jumat
-        session1_start, session1_end = datetime.time(9, 0), datetime.time(11, 30)
-        session2_start, session2_end = datetime.time(14, 0), datetime.time(15, 50)
-    else: # Senin s/d Kamis
-        session1_start, session1_end = datetime.time(9, 0), datetime.time(12, 0)
-        session2_start, session2_end = datetime.time(13, 30), datetime.time(15, 50)
-        
-    return (session1_start <= current_time <= session1_end) or (session2_start <= current_time <= session2_end)
+    session1 = time(9, 0) <= current_time <= time(12, 0)
+    session2 = time(13, 30) <= current_time <= time(16, 0)
+    return session1 or session2
 
-# ==========================================
-# METRIK RSI, VSA, ATR & SCORE
-# ==========================================
-def calculate_rsi(series, period=14):
-    delta = series.diff()
-    gain = delta.where(delta > 0, 0.0)
-    loss = -delta.where(delta < 0, 0.0)
-    
-    avg_gain = gain.ewm(alpha=1/period, min_periods=period, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1/period, min_periods=period, adjust=False).mean()
-    
-    rs = avg_gain / avg_loss.replace(0, 0.00001)
-    rsi = 100.0 - (100.0 / (1.0 + rs))
-    return rsi.fillna(50)
+def filter_signals_with_cooldown(signals: list) -> list:
+    now = datetime.now()
+    filtered = []
+    for sig in signals:
+        ticker = sig['ticker']
+        last_time = signal_cooldowns.get(ticker)
+        if last_time is None or (now - last_time).total_seconds() > COOLDOWN_SECONDS:
+            signal_cooldowns[ticker] = now
+            filtered.append(sig)
+    return filtered
 
-def calculate_atr(df, period=14):
-    high, low, close = df['High'], df['Low'], df['Close']
-    tr1 = high - low
-    tr2 = (high - close.shift(1)).abs()
-    tr3 = (low - close.shift(1)).abs()
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    return tr.rolling(window=period, min_periods=1).mean()
-
-def calculate_vsa_metrics(df):
-    price_range = (df['High'] - df['Low']).replace(0, 0.1)
-    body_move = df['Close'] - df['Open']
-    buy_ratio = np.where(
-        price_range <= 0.1, 0.50,
-        np.where(df['Close'] >= df['Open'], 
-                 0.55 + (body_move / price_range) * 0.4, 
-                 0.45 + (body_move / price_range) * 0.4)
-    )
-    buy_ratio = np.clip(buy_ratio, 0.05, 0.95)
-    
-    df['Vol_Buy'] = df['Volume'] * buy_ratio
-    df['Vol_Sell'] = df['Volume'] - df['Vol_Buy']
-    df['Net_Vol_VSA'] = df['Vol_Buy'] - df['Vol_Sell']
-    df['Net_Val_VSA'] = df['Net_Vol_VSA'] * df['Close']
-    return df, buy_ratio
-
-def calculate_buy_signal_strength(df):
-    if len(df) < 20:
-        return 0, "NO DATA"
-
-    last_row = df.iloc[-1]
-    last_close, last_open, last_vol = last_row['Close'], last_row['Open'], last_row['Volume']
-    avg_vol_v1 = last_row['V1']
-
-    df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
-    ema_50 = df['EMA50'].iloc[-1]
-
-    df, buy_ratios = calculate_vsa_metrics(df)
-    last_buy_ratio = buy_ratios[-1]
-    net_5d_val = df['Net_Val_VSA'].tail(5).sum()
-
-    score = 0
-    if last_close > ema_50: score += 25
-
-    vol_multiple = last_vol / avg_vol_v1 if avg_vol_v1 > 0 else 0
-    if vol_multiple >= 2.5: score += 25
-    elif vol_multiple >= 2.0: score += 20
-    elif vol_multiple >= 1.8: score += 15
-
-    if last_buy_ratio >= 0.75: score += 20
-    elif last_buy_ratio >= 0.65: score += 15
-    elif last_buy_ratio >= 0.55: score += 10
-
-    if net_5d_val > 0: score += 20
-    if last_close > last_open: score += 10
-
-    if score >= 85: label = "VERY STRONG"
-    elif score >= 70: label = "STRONG BUY"
-    elif score >= 50: label = "WEAK BUY"
-    else: label = "NO SIGNAL"
-
-    return score, label
-
-def check_volume_spike_signal(df, symbol, threshold_multiplier=2.0, min_value_traded=500_000_000):
-    if len(df) < 20: 
-        return False, {}
-    
-    last_row = df.iloc[-1]
-    last_close, last_vol = last_row['Close'], last_row['Volume']
-
-    if last_close <= 50 or last_vol == 0: 
-        return False, {}
-
-    value_traded = last_close * last_vol
-    if value_traded < min_value_traded: 
-        return False, {}
-
-    df, buy_ratios = calculate_vsa_metrics(df)
-    avg_vol_v1, last_open, last_buy_ratio = last_row['V1'], last_row['Open'], buy_ratios[-1]
-    
-    df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
-    df['RSI14'] = calculate_rsi(df['Close'], period=14)
-    
-    ema_50 = df['EMA50'].iloc[-1]
-    last_rsi = round(df['RSI14'].iloc[-1], 2)
-
-    net_5d_val = df['Net_Val_VSA'].tail(5).sum()
-    is_bandar_accum = net_5d_val > 0
-
-    if (last_close > ema_50) and \
-       (last_rsi <= 75) and \
-       (last_vol >= (avg_vol_v1 * threshold_multiplier)) and \
-       is_bandar_accum and \
-       (last_buy_ratio > 0.65) and \
-       (last_close > last_open):
-        
-        vol_multiple = last_vol / avg_vol_v1 if avg_vol_v1 > 0 else 0
-        change_pct = ((last_close / df['Close'].iloc[-2]) - 1) * 100 if len(df) > 1 else 0.0
-        score, score_label = calculate_buy_signal_strength(df)
-
-        return True, {
-            "symbol": symbol, "close": safe_int(last_close), "change_pct": change_pct,
-            "vol_multiple": vol_multiple, "buy_ratio": safe_int(last_buy_ratio * 100),
-            "volume": safe_int(last_vol), "value_traded": value_traded,
-            "bandar_5d_val": net_5d_val, "rsi": last_rsi, "score": score, "score_label": score_label
-        }
-    return False, {}
-
-# ==========================================
-# CHART GENERATOR (REVISI MARGIN KIRI & UKURAN EMA)
-# ==========================================
-def generate_pro_chart(df, symbol="MHKI", timeframe="5m", sector_info="MHKI | IHSG", output_filename="chart_output.png"):
+def fetch_stock_history_multi_tf(ticker: str, timeframe: str = "Daily") -> pd.DataFrame:
     try:
-        tf_clean = timeframe.lower().strip()
-        is_intraday = tf_clean in ['1m', '5m', '15m', '30m', '1h']
-
-        col_map = {c: str(c).lower().strip() for c in df.columns}
-        df.rename(columns=col_map, inplace=True)
-        df.rename(columns={
-            'open': 'Open', 'high': 'High', 'low': 'Low', 
-            'close': 'Close', 'volume': 'Volume',
-            'date': 'Date', 'datetime': 'Date', 'time': 'Date', 't': 'Date'
-        }, inplace=True)
-
-        if 'Date' in df.columns:
-            df['Date'] = pd.to_datetime(df['Date'])
-            df.set_index('Date', inplace=True)
-
-        df = df.ffill().bfill()
-        if isinstance(df.index, pd.DatetimeIndex): 
-            df = df.sort_index()
-
-        for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-
-        last_close = df['Close'].iloc[-1]
-        last_open = df['Open'].iloc[-1]
-        last_high = df['High'].iloc[-1]
-        last_low = df['Low'].iloc[-1]
-        last_vol = df['Volume'].iloc[-1]
-
-        # MULTI EMA CALCULATIONS
-        df['EMA8'] = df['Close'].ewm(span=8, adjust=False).mean()
-        df['EMA21'] = df['Close'].ewm(span=21, adjust=False).mean()
-        df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
-        df['EMA125'] = df['Close'].ewm(span=125, adjust=False).mean()
-        
-        df['RSI14'] = calculate_rsi(df['Close'], period=14)
-        df['ATR'] = calculate_atr(df, period=14)
-
-        df['Pivot_High'] = df['High'].rolling(window=12, min_periods=1).max()
-        df['Pivot_Low'] = df['Low'].rolling(window=12, min_periods=1).min()
-        df['V1'] = df['Volume'].rolling(20, min_periods=1).mean()
-
-        df, buy_ratios = calculate_vsa_metrics(df)
-        net_5d_val = df['Net_Val_VSA'].tail(5).sum()
-        net_val_today = df['Net_Val_VSA'].iloc[-1]
-        last_rsi = round(df['RSI14'].iloc[-1], 2)
-        
-        signal_score, score_lbl = calculate_buy_signal_strength(df)
-
-        if 'MM' not in df.columns:
-            df['MM'] = (df['Close'] - df['EMA50']) / df['EMA50'] * 1000 + np.sin(np.linspace(0, 10, len(df))) * 15 - 10.9258
-
-        plt.style.use('dark_background')
-        
-        fig = plt.figure(figsize=(18, 10), dpi=300, facecolor='#000000')
-        gs = gridspec.GridSpec(4, 1, height_ratios=[4, 0.25, 1.2, 0.8], hspace=0.04)
-
-        ax_main = fig.add_subplot(gs[0])
-        ax_bar = fig.add_subplot(gs[1], sharex=ax_main)
-        ax_vol = fig.add_subplot(gs[2], sharex=ax_main)
-        ax_mm = fig.add_subplot(gs[3], sharex=ax_main)
-
-        fig.subplots_adjust(left=0.065, right=0.93, top=0.94, bottom=0.06)
-
-        color_up, color_down, color_neutral = '#00ff00', '#ff0000', '#888888'
-
-        for ax in [ax_main, ax_bar, ax_vol, ax_mm]:
-            ax.set_facecolor('#000000')
-            ax.grid(True, color='#1e1e1e', linestyle=':', linewidth=0.6)
-            ax.tick_params(colors='white', labelsize=10)
-            ax.yaxis.tick_right()
-
-        x_indices = np.arange(len(df))
-
-        # Render Candlestick
-        for i in range(len(df)):
-            open_p, high_p, low_p, close_p = df['Open'].iloc[i], df['High'].iloc[i], df['Low'].iloc[i], df['Close'].iloc[i]
-            if close_p >= open_p:
-                body_top, body_bottom = close_p, open_p
-                body_height = max(0.2, close_p - open_p)
-                ax_main.plot([i, i], [high_p, body_top], color=color_up, linewidth=1.2)
-                ax_main.plot([i, i], [low_p, body_bottom], color=color_up, linewidth=1.2)
-                rect = patches.Rectangle((i - 0.35, body_bottom), 0.7, body_height, linewidth=1.2, edgecolor=color_up, facecolor='none')
-                ax_main.add_patch(rect)
-            else:
-                body_top, body_bottom = open_p, close_p
-                body_height = max(0.2, open_p - close_p)
-                ax_main.plot([i, i], [low_p, high_p], color=color_down, linewidth=1.2)
-                rect = patches.Rectangle((i - 0.35, body_bottom), 0.7, body_height, linewidth=1.2, edgecolor=color_down, facecolor=color_down)
-                ax_main.add_patch(rect)
-
-        ax_main.plot(x_indices, df['EMA8'], color='#00ffff', linewidth=0.8, label='EMA 8')
-        ax_main.plot(x_indices, df['EMA21'], color='#ff00ff', linewidth=1.0, label='EMA 21')
-        ax_main.plot(x_indices, df['EMA50'], color='#ffff00', linewidth=1.1, label='EMA 50')
-        ax_main.plot(x_indices, df['EMA125'], color='#ffffff', linewidth=1.3, label='EMA 125')
-
-        ax_main.step(x_indices, df['Pivot_High'], where='mid', color='#555555', linestyle='--', linewidth=1.0)
-        ax_main.step(x_indices, df['Pivot_Low'], where='mid', color='#444444', linestyle=':', linewidth=1.0)
-
-        last_signal_idx = -10
-        latest_setup = {"status": "WAIT & SEE", "entry": 0, "tp1": 0, "tp2": 0, "danger": 0}
-
-        for i in range(5, len(df)):
-            c_price, o_price = df['Close'].iloc[i], df['Open'].iloc[i]
-            vol_curr, vol_avg = df['Volume'].iloc[i], df['V1'].iloc[i]
-            ema_50 = df['EMA50'].iloc[i]
-            b_ratio = buy_ratios[i]
-            atr_val = df['ATR'].iloc[i]
-            rsi_val = df['RSI14'].iloc[i]
-            
-            net_5d_val_i = df['Net_Val_VSA'].iloc[max(0, i-4):i+1].sum()
-            is_bandar_accum_i = net_5d_val_i > 0
-
-            is_accum_trend = (c_price > 50) and (c_price > ema_50) and (rsi_val <= 75) and (vol_curr >= vol_avg * 2.0) and is_bandar_accum_i and (b_ratio > 0.65) and (c_price > o_price)
-
-            if is_accum_trend and (i - last_signal_idx >= 4):
-                buy_price = round_to_ihsg_fraction(c_price)
-                tp1_price = round_to_ihsg_fraction(buy_price * 1.035)
-                tp2_price = round_to_ihsg_fraction(buy_price + (1.5 * atr_val))
-                swing_low = df['Pivot_Low'].iloc[i]
-                danger_price = round_to_ihsg_fraction(min(swing_low, buy_price - (1.0 * atr_val)))
-
-                ax_main.plot(i, df['Low'].iloc[i] * 0.985, marker='^', color='#00ff00', markersize=7, zorder=6)
-                if i >= len(df) - 3:
-                    ax_main.text(i, df['Low'].iloc[i] * 0.96, f"BUY @ {buy_price}", color='#00ff00', fontsize=8, fontweight='bold', ha='center',
-                                 bbox=dict(boxstyle='round,pad=0.2', facecolor='#000000', alpha=0.75, edgecolor='#00ff00'))
-
-                latest_setup = {"status": "BUY ACCUMULATION", "entry": buy_price, "tp1": tp1_price, "tp2": tp2_price, "danger": danger_price}
-                last_signal_idx = i
-
-        max_high = df['High'].max()
-        min_low = df['Low'].min()
-        ax_main.set_ylim(min_low * 0.95, max_high * 1.25)
-        ax_main.set_xlim(-0.5, len(df) - 0.5)
-
-        # DASHBOARD OVERLAY (COMPACT SISI KIRI)
-        status_color = "#00ff00" if latest_setup["status"] == "BUY ACCUMULATION" else "#ffff00"
-        
-        entry_val = latest_setup['entry'] if latest_setup['entry'] > 0 else last_close
-        tp1_val = latest_setup['tp1'] if latest_setup['tp1'] > 0 else round_to_ihsg_fraction(last_close*1.035)
-        tp2_val = latest_setup['tp2'] if latest_setup['tp2'] > 0 else round_to_ihsg_fraction(last_close*1.07)
-        sl_val = latest_setup['danger'] if latest_setup['danger'] > 0 else round_to_ihsg_fraction(last_close*0.95)
-
-        dashboard_text = (
-            f"RAFANO DASHBOARD\n"
-            f"-----------------------\n"
-            f"O:{safe_int(last_open)} H:{safe_int(last_high)} L:{safe_int(last_low)} C:{safe_int(last_close)}\n"
-            f"VOL: {format_large_number(last_vol)}\n"
-            f"-----------------------\n"
-            f"SCORE  : {signal_score}% ({score_lbl})\n"
-            f"STATUS : {latest_setup['status']}\n"
-            f"ENTRY  : {entry_val}\n"
-            f"TP1    : {tp1_val}\n"
-            f"TP2    : {tp2_val}\n"
-            f"SL     : {sl_val}"
-        )
-        
-        ax_main.text(0.01, 0.96, dashboard_text, transform=ax_main.transAxes, verticalalignment='top', horizontalalignment='left',
-                     fontfamily='monospace', fontsize=8.5, color=status_color,
-                     bbox=dict(boxstyle='round,pad=0.3', facecolor='#000000', alpha=0.75, edgecolor='#333333'))
-
-        stat_text_right = (
-            f"RSI (14)   : {last_rsi}\n"
-            f"BANDAR 1W  : {'ACCUM' if net_5d_val > 0 else 'DISTRIB'}\n"
-            f"VAL 1D     : {format_large_number(net_val_today, show_sign=True)}\n"
-            f"VSA BUY    : {safe_int(buy_ratios[-1]*100)}%"
-        )
-        ax_main.text(0.985, 0.96, stat_text_right, transform=ax_main.transAxes, verticalalignment='top', horizontalalignment='right',
-                     fontfamily='monospace', fontsize=8.5, color='#00ffff',
-                     bbox=dict(boxstyle='round,pad=0.3', facecolor='#000000', alpha=0.75, edgecolor='#333333'))
-
-        latest_ph, latest_pl = df['Pivot_High'].iloc[-1], df['Pivot_Low'].iloc[-1]
-        
-        ax_main.text(1.01, latest_ph, f" {safe_int(latest_ph)} ", 
-                     transform=ax_main.get_yaxis_transform(),
-                     color='black', backgroundcolor='#ffff00', 
-                     fontsize=8.5, fontweight='bold', va='center', ha='left', clip_on=False)
-                     
-        ax_main.text(1.01, latest_pl, f" {safe_int(latest_pl)} ", 
-                     transform=ax_main.get_yaxis_transform(),
-                     color='black', backgroundcolor='#00ffff', 
-                     fontsize=8.5, fontweight='bold', va='center', ha='left', clip_on=False)
-
-        # HEADER CHART
-        fig.text(0.01, 0.975, f"{symbol}", color='#ffffff', fontsize=16, fontweight='bold')
-        fig.text(0.45, 0.975, "RAFANO TRADER", color='#ffffff', fontsize=15, fontweight='bold')
-        
-        last_date_str = get_now_wib().strftime('%d %b %Y')
-        fig.text(0.88, 0.975, f"{tf_clean.upper()} {last_date_str}", color='#ffff00', fontsize=10, fontweight='bold', ha='right')
-
-        sub_header = f"{sector_info}"
-        fig.text(0.01, 0.945, sub_header, color='#888888', fontsize=8.5)
-
-        for i in range(len(df)):
-            c, o = df['Close'].iloc[i], df['Open'].iloc[i]
-            bar_color = color_neutral if abs(c - o) / max(1, o) < 0.0005 else (color_up if c >= o else color_down)
-            ax_bar.add_patch(patches.Rectangle((i - 0.5, 0), 1.0, 1.0, color=bar_color))
-        ax_bar.set_ylim(0, 1)
-        ax_bar.axis('off')
-
-        ax_vol.bar(x_indices, df['Vol_Sell'], color='#ff0000', width=0.8, align='center')
-        ax_vol.bar(x_indices, df['Vol_Buy'], bottom=df['Vol_Sell'], color='#00ff00', width=0.8, align='center')
-        ax_vol.plot(x_indices, df['V1'], color='#ffffff', linewidth=1.0, linestyle='-')
-        
-        net_val_str = format_large_number(net_val_today, show_sign=True)
-        net_5d_val_str = format_large_number(net_5d_val, show_sign=True)
-        last_buy_pct = safe_int(buy_ratios[-1] * 100)
-        vol_text = (f"Buy: {last_buy_pct}%  Sell: {100 - last_buy_pct}%  Val 1D: {net_val_str}  Val 5D: {net_5d_val_str}")
-        ax_vol.text(0.01, 0.85, vol_text, transform=ax_vol.transAxes, color='#00ffff', fontsize=8, fontweight='bold')
-        ax_vol.set_ylim(0, df['Volume'].max() * 1.35)
-
-        mm_colors = ['#ffff00' if v >= 0 else '#555555' for v in df['MM']]
-        ax_mm.bar(x_indices, df['MM'], color=mm_colors, width=0.4)
-        ax_mm.text(0.01, 0.80, "Market Maker", transform=ax_mm.transAxes, color='#ffff00', fontsize=8, fontweight='bold')
-        
-        ax_mm.text(1.01, df['MM'].iloc[-1], f" {df['MM'].iloc[-1]:.2f} ", 
-                   transform=ax_mm.get_yaxis_transform(),
-                   color='black', backgroundcolor='#ffff00', 
-                   fontsize=8.5, fontweight='bold', va='center', ha='left', clip_on=False)
-
-        step = max(1, len(df) // 8)
-        ax_mm.set_xticks(x_indices[::step])
-        if isinstance(df.index, pd.DatetimeIndex):
-            fmt = "%H:%M" if is_intraday else "%b %Y"
-            ax_mm.set_xticklabels([df.index[k].strftime(fmt) for k in range(0, len(df), step)])
-
-        plt.setp(ax_main.get_xticklabels(), visible=False)
-        plt.setp(ax_vol.get_xticklabels(), visible=False)
-
-        plt.savefig(
-            output_filename, 
-            dpi=300, 
-            bbox_inches='tight', 
-            pad_inches=0.05,
-            facecolor=fig.get_facecolor(),
-            format='png'
-        )
-        return output_filename
-    finally:
-        plt.clf()
-        plt.close('all')
-
-# ==========================================
-# FETCH DATA & SCANNER
-# ==========================================
-def fetch_stock_history_multi_tf(symbol, timeframe="1d"):
-    timeframe = timeframe.lower().strip()
-    yf_tf_map = {
-        '1m': ('1m', '1d'), '5m': ('5m', '5d'), '15m': ('15m', '1mo'),
-        '30m': ('30m', '1mo'), '1h': ('1h', '3mo'), '1d': ('1d', '1y'),
-        '1w': ('1wk', '2y'), '1mth': ('1mo', '5y')
-    }
-    yf_setting = yf_tf_map.get(timeframe)
-    interval, period = yf_setting if yf_setting else ('1d', '1y')
-
-    if interval == '1d':
-        endpoints = [
-            f"{ARJUM_API_BASE_URL}/history/{symbol}?interval=1d&limit=150",
-            f"{ARJUM_API_BASE_URL}/klines?symbol={symbol}&interval=1d"
-        ]
-        for url in endpoints:
+        # Coba ambil data dari API Arjum jika tersedia, fallback ke yfinance
+        if timeframe == "Daily":
             try:
-                res = requests.get(url, headers=HEADERS, timeout=3)
+                url = f"{ARJUM_API_BASE_URL}/stock/{ticker}"
+                res = requests.get(url, headers=HEADERS, timeout=5)
                 if res.status_code == 200:
                     data = res.json()
-                    klines = data.get("data") or data.get("results") or data
-                    if isinstance(klines, list) and len(klines) > 10:
-                        df_res = pd.DataFrame(klines)
-                        df_res['Symbol_Owner'] = symbol
-                        return df_res
+                    # Sesuaikan parsing jika endpoint Arjum mengembalikan list/dict historis
+                    # Jika format JSON tidak langsung cocok, fallback ke yfinance di bawah
             except Exception:
                 pass
 
-    if yf is not None:
-        try:
-            yf_symbol = symbol if (symbol.endswith(".JK") or not symbol.isalpha()) else f"{symbol}.JK"
-            ticker_obj = yf.Ticker(yf_symbol)
-            df_yf = ticker_obj.history(interval=interval, period=period, auto_adjust=False, actions=False)
-            if df_yf is not None and not df_yf.empty:
-                if isinstance(df_yf.columns, pd.MultiIndex):
-                    df_yf.columns = df_yf.columns.get_level_values(0)
-                df_yf.reset_index(inplace=True)
-                for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
-                    if col in df_yf.columns:
-                        df_yf[col] = pd.to_numeric(df_yf[col], errors='coerce')
-                df_clean = df_yf.dropna(subset=['Close']).copy()
-                df_clean['Symbol_Owner'] = symbol
-                return df_clean
-        except Exception:
-            pass
-    return None
-
-def scan_single_symbol_tf(symbol, timeframe="1d"):
-    try:
-        df = fetch_stock_history_multi_tf(symbol, timeframe=timeframe)
-        if df is not None and len(df) >= 20:
-            column_mapping = {'open':'Open', 'high':'High', 'low':'Low', 'close':'Close', 'volume':'Volume'}
-            df.rename(columns=lambda x: column_mapping.get(str(x).lower().strip(), x), inplace=True)
-            df['V1'] = df['Volume'].rolling(20, min_periods=1).mean()
-            has_spike, info = check_volume_spike_signal(df, symbol, threshold_multiplier=2.0)
-            if has_spike:
-                info['timeframe'] = timeframe
-                return info
-    except Exception:
-        pass
-    return None
-
-def run_scan_process_custom_tf(timeframe="1d"):
-    detected_signals = []
-    with ThreadPoolExecutor(max_workers=15) as executor:
-        futures = [executor.submit(scan_single_symbol_tf, sym, timeframe) for sym in TOP_300_IHSG]
-        for f in futures:
-            res = f.result()
-            if res:
-                detected_signals.append(res)
-    detected_signals.sort(key=lambda x: x.get('score', 0), reverse=True)
-    return detected_signals
+        symbol = f"{ticker}.JK" if not ticker.endswith(".JK") else ticker
+        period = "1y" if timeframe == "Daily" else "1mo"
+        interval = "1d" if timeframe == "Daily" else ("5m" if timeframe == "5m" else "15m")
+        
+        df = yf.download(symbol, period=period, interval=interval, progress=False)
+        if df.empty:
+            return None
+            
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+            
+        df = df.rename(columns={
+            'Open': 'Open', 'High': 'High', 'Low': 'Low', 
+            'Close': 'Close', 'Volume': 'Volume'
+        })
+        return df
+    except Exception as e:
+        logger.error(f"Error fetching data for {ticker}: {e}")
+        return None
 
 # ==========================================
-# TELEGRAM BROADCASTER
+# 3. INDIKATOR & VSA METRICS
 # ==========================================
-def send_reply(chat_id, text, reply_markup=None):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
-    if reply_markup:
-        payload["reply_markup"] = reply_markup
-    try:
-        requests.post(url, json=payload, timeout=10)
-    except Exception as e:
-        print(f"❌ Error Send Message: {e}")
-
-def send_photo_reply(chat_id, photo_path, caption=""):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
-    try:
-        with open(photo_path, 'rb') as photo:
-            requests.post(
-                url, 
-                data={'chat_id': chat_id, 'caption': caption, 'parse_mode': 'Markdown'}, 
-                files={'photo': photo}, 
-                timeout=30
-            )
-    except Exception as e:
-        print(f"❌ Error Send Photo: {e}")
-
-def broadcast_screening_results(signals, title_header, tf_code, target_chat_id=None):
-    if target_chat_id is None:
-        target_chat_id = TARGET_CHAT_ID
-
-    now_str = get_now_wib().strftime('%d %b %Y %H:%M WIB')
+def calculate_vsa_metrics(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df['V1'] = df['Volume'].rolling(window=20).mean()
     
-    header_msg = (
-        f"{title_header}\n"
-        f"Waktu Scan: {now_str}\n"
-        f"Total Sinyal Terkirim: {len(signals)} Emiten\n"
-        f"Filter Cooldown: 60 Menit Jeda per Emiten\n"
-        f"========================================\n\n"
+    # Perhitungan EMA Standar (13, 20, 50, 200)
+    df['EMA13'] = df['Close'].ewm(span=13, adjust=False).mean()
+    df['EMA20'] = df['Close'].ewm(span=20, adjust=False).mean()
+    df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
+    df['EMA200'] = df['Close'].ewm(span=200, adjust=False).mean()
+    
+    # RSI 14
+    delta = df['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss
+    df['RSI'] = 100 - (100 / (1 + rs))
+    
+    # VSA Metrics
+    price_range = df['High'] - df['Low']
+    price_range = price_range.replace(0, 0.001)
+    df['Buy_Ratio'] = np.where(df['Close'] >= df['Open'], 
+                              0.5 + 0.5 * ((df['Close'] - df['Open']) / price_range),
+                              0.5 * (1 - (df['Open'] - df['Close']) / price_range))
+    
+    df['Net_Val_VSA'] = df['Volume'] * (df['Buy_Ratio'] - (1 - df['Buy_Ratio'])) * df['Close']
+    df['AvgPrice'] = (df['High'] + df['Low'] + df['Close']) / 3
+    df['MM_Flow'] = (df['Close'] - df['EMA20']) / df['EMA20'] * 1000
+    return df
+
+def check_volume_spike_signal(df: pd.DataFrame, ticker: str) -> dict:
+    if len(df) < 50:
+        return None
+        
+    df = calculate_vsa_metrics(df)
+    last = df.iloc[-1]
+    
+    val_trans = last['Close'] * last['Volume']
+    if last['Close'] <= 50 or val_trans < 500_000_000:
+        return None
+        
+    cond_trend = last['Close'] > last['EMA50']
+    cond_rsi = last['RSI'] <= 75
+    cond_vol = last['Volume'] >= (2.0 * last['V1'])
+    cond_vsa = df['Net_Val_VSA'].tail(5).sum() > 0
+    cond_candle = (last['Buy_Ratio'] > 0.65) and (last['Close'] > last['Open'])
+    
+    if cond_trend and cond_rsi and cond_vol and cond_vsa and cond_candle:
+        score = int(last['Buy_Ratio'] * 40 + (last['Volume'] / last['V1']) * 20 + 20)
+        score = min(score, 100)
+        
+        rating = "STRONG BUY" if score >= 80 else "BUY"
+        return {
+            'ticker': ticker,
+            'price': int(last['Close']),
+            'volume': int(last['Volume']),
+            'vol_avg': int(last['V1']),
+            'rsi': round(last['RSI'], 1),
+            'buy_ratio': round(last['Buy_Ratio'] * 100, 1),
+            'score': score,
+            'rating': rating
+        }
+    return None
+
+# ==========================================
+# 4. CHART GENERATOR (BRANDING: RAFANO TRADER)
+# ==========================================
+def generate_pro_chart(df: pd.DataFrame, ticker: str, period: str = "Daily") -> io.BytesIO:
+    df = df.copy()
+    if 'EMA13' not in df.columns:
+        df = calculate_vsa_metrics(df)
+        
+    fig = plt.figure(figsize=(14, 8), facecolor='black')
+    gs = gridspec.GridSpec(4, 1, height_ratios=[3.5, 1, 0.8, 0.8], hspace=0.05)
+    
+    ax_main = plt.subplot(gs[0])
+    ax_vol = plt.subplot(gs[1], sharex=ax_main)
+    ax_nbsa = plt.subplot(gs[2], sharex=ax_main)
+    ax_mm = plt.subplot(gs[3], sharex=ax_main)
+    
+    for ax in [ax_main, ax_vol, ax_nbsa, ax_mm]:
+        ax.set_facecolor('black')
+        ax.tick_params(colors='white', labelsize=8)
+        ax.grid(True, color='#222222', linestyle='--', linewidth=0.5)
+        for spine in ax.spines.values():
+            spine.set_color('#444444')
+
+    last_row = df.iloc[-1]
+    prev_row = df.iloc[-2] if len(df) > 1 else last_row
+    chg_pct = ((last_row['Close'] - prev_row['Close']) / prev_row['Close']) * 100
+    
+    # --- HEADER TOP (BRANDING: RAFANO TRADER) ---
+    title_left = f"{ticker} :  {int(last_row['Close'])} ({chg_pct:+.2f}%)"
+    ax_main.text(0.01, 1.04, title_left, transform=ax_main.transAxes, color='yellow', fontsize=13, fontweight='bold')
+    ax_main.text(0.50, 1.04, "RAFANO TRADER", transform=ax_main.transAxes, color='white', fontsize=13, fontweight='bold', ha='center')
+    
+    date_str = last_row.name.strftime('%d %b %Y') if isinstance(last_row.name, pd.Timestamp) else str(last_row.name)
+    ax_main.text(0.99, 1.04, f"{period} {date_str}\nCommand BOT /{ticker}", transform=ax_main.transAxes, color='yellow', fontsize=8, ha='right')
+
+    # --- MAIN CANDLESTICK ---
+    x_axis = np.arange(len(df))
+    width = 0.6
+    
+    up = df['Close'] >= df['Open']
+    down = df['Close'] < df['Open']
+    
+    ax_main.vlines(x_axis[up], df['Low'][up], df['High'][up], color='#00FF00', linewidth=1)
+    ax_main.vlines(x_axis[down], df['Low'][down], df['High'][down], color='#FF0000', linewidth=1)
+    
+    for i in range(len(df)):
+        open_p, close_p = df['Open'].iloc[i], df['Close'].iloc[i]
+        color = '#00FF00' if close_p >= open_p else '#FF0000'
+        ax_main.add_patch(Rectangle((i - width/2, min(open_p, close_p)), width, abs(close_p - open_p), color=color, fill=True))
+
+    # EMA Lines Sesuai Tampilan
+    ax_main.plot(x_axis, df['EMA13'], color='orange', linewidth=1.2, label='EMA 13')
+    ax_main.plot(x_axis, df['EMA20'], color='red', linewidth=1.2, label='EMA 20')
+    ax_main.plot(x_axis, df['EMA50'], color='white', linewidth=1.2, label='EMA 50')
+    ax_main.plot(x_axis, df['EMA200'], color='purple', linewidth=1.5, label='EMA 200')
+
+    # Info Stats Overlay (Kiri Atas)
+    vchg_1d = (last_row['Volume'] / df['Volume'].iloc[-2]) if len(df) > 1 else 1.0
+    vchg_5d = (last_row['Volume'] / df['Volume'].tail(5).mean())
+    
+    info_text = (
+        f"Avg Price   : {last_row.get('AvgPrice', last_row['Close']):.1f}\n"
+        f"Vchg 1 Day  : {vchg_1d:.1f}x\n"
+        f"Vchg 5 Days : {vchg_5d:.1f}x\n"
+        f"Speed       : SLOW\n"
+        f"Power       : TURBO\n"
+        f"Safety      : BAD\n"
+        f"\n"
+        f"EMA 13      : {last_row['EMA13']:.1f}\n"
+        f"EMA 20      : {last_row['EMA20']:.1f}\n"
+        f"EMA 50      : {last_row['EMA50']:.1f}\n"
+        f"EMA 200     : {last_row['EMA200']:.1f}"
+    )
+    ax_main.text(0.01, 0.95, info_text, transform=ax_main.transAxes, color='white', fontsize=7.5, 
+                 family='monospace', verticalalignment='top', bbox=dict(boxstyle='round,pad=0.3', facecolor='black', alpha=0.6, edgecolor='none'))
+
+    # Right Price Box
+    curr_close = int(last_row['Close'])
+    ax_main.text(1.005, curr_close, f" {curr_close} ", transform=ax_main.get_yaxis_transform(),
+                 color='white', backgroundcolor='#555555', fontsize=8, fontweight='bold', va='center')
+
+    # --- VOLUME SUBPLOT ---
+    vol_colors = ['#00FF00' if df['Close'].iloc[i] >= df['Open'].iloc[i] else '#FF0000' for i in range(len(df))]
+    ax_vol.bar(x_axis, df['Volume'], color=vol_colors, width=width, alpha=0.8)
+    if 'V1' in df.columns:
+        ax_vol.plot(x_axis, df['V1'], color='white', linewidth=1)
+        
+    buy_pct = int(last_row.get('Buy_Ratio', 0.65) * 100)
+    sell_pct = 100 - buy_pct
+    net_vol = last_row.get('Net_Val_VSA', 0)
+    net_5d = df['Net_Val_VSA'].tail(5).sum() if 'Net_Val_VSA' in df.columns else net_vol
+    
+    vol_text = f"Buy Percent = {buy_pct}%   Sell Percent = {sell_pct}%   Net Vol = {net_vol:,.0f}   Net 5D = {net_5d:,.0f}"
+    ax_vol.text(0.01, 0.85, vol_text, transform=ax_vol.transAxes, color='yellow', fontsize=7.5, fontweight='bold')
+
+    # --- NBSA SUBPLOT ---
+    nbsa_val = df['Net_Val_VSA'] if 'Net_Val_VSA' in df.columns else df['Volume'] * (df['Close'] - df['Open'])
+    nbsa_colors = ['#00FFFF' if v >= 0 else '#FF0000' for v in nbsa_val]
+    ax_nbsa.bar(x_axis, nbsa_val, color=nbsa_colors, width=width)
+    ax_nbsa.text(0.01, 0.75, "NBSA Rp / Value Indicator", transform=ax_nbsa.transAxes, color='white', fontsize=7)
+
+    # --- MARKET MAKER SUBPLOT ---
+    mm_val = df['MM_Flow'] if 'MM_Flow' in df.columns else np.zeros(len(df))
+    ax_mm.bar(x_axis, mm_val, color='white', width=0.3, alpha=0.7)
+    ax_mm.text(0.01, 0.75, "Market Maker", transform=ax_mm.transAxes, color='yellow', fontsize=7)
+
+    # Formatting Sumbu X
+    plt.setp(ax_main.get_xticklabels(), visible=False)
+    plt.setp(ax_vol.get_xticklabels(), visible=False)
+    plt.setp(ax_nbsa.get_xticklabels(), visible=False)
+    
+    step = max(1, len(df) // 6)
+    ax_mm.set_xticks(x_axis[::step])
+    ax_mm.set_xticklabels([df.index[i].strftime('%b') if isinstance(df.index[i], pd.Timestamp) else str(df.index[i]) for i in range(0, len(df), step)])
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', bbox_inches='tight', facecolor='black', dpi=150)
+    buf.seek(0)
+    plt.close(fig)
+    return buf
+
+# ==========================================
+# 5. HANDLER TELEGRAM & BOT LOGIC
+# ==========================================
+async def process_chart_request(update: Update, context: ContextTypes.DEFAULT_TYPE, ticker: str, period: str = "Daily"):
+    chat_id = update.effective_chat.id
+    try:
+        await context.bot.send_chat_action(chat_id=chat_id, action="upload_photo")
+        
+        df = fetch_stock_history_multi_tf(ticker, timeframe=period)
+        if df is None or df.empty:
+            await context.bot.send_message(chat_id=chat_id, text=f"❌ Gagal mengambil data chart untuk {ticker}.")
+            return
+
+        df = calculate_vsa_metrics(df)
+        chart_buf = generate_pro_chart(df, ticker, period=period)
+        
+        caption = f"📊 **RAFANO TRADER Chart: {ticker} ({period})**\nPrice: Rp{int(df['Close'].iloc[-1])}"
+        await context.bot.send_photo(chat_id=chat_id, photo=chart_buf, caption=caption, parse_mode="Markdown")
+        
+    except Exception as e:
+        logger.error(f"Error processing chart request for {ticker}: {e}")
+        await context.bot.send_message(chat_id=chat_id, text=f"⚠️ Terjadi kesalahan saat membuat chart {ticker}.")
+
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🤖 **RAFANO TRADER Bot Active!**\n\n"
+        "Bot akan otomatis mengirim sinyal *Volume Spike & Akumulasi Bandar* pada jam bursa.\n"
+        "Gunakan command `/chart <TICKER>` untuk melihat chart saham secara langsung."
     )
 
-    if not signals:
-        send_reply(target_chat_id, f"{header_msg}Tidak ditemukan emiten yang memenuhi kriteria.")
+async def chart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Gunakan format: `/chart <TICKER>` (contoh: `/chart BIPI`)")
         return
+    ticker = context.args[0].upper()
+    await process_chart_request(update, context, ticker, period="Daily")
 
-    current_msg = header_msg
-    inline_keyboard = []
-
-    for idx, item in enumerate(signals, 1):
-        item_str = (
-            f"{idx}. {item['symbol']} — Harga {item['close']} ({item['change_pct']:+.2f}%)\n"
-            f"    ├  Buy Strength Score: {item['score']}% ({item['score_label']})\n"
-            f"    ├  RSI (14): {item['rsi']}\n"
-            f"    ├ Vol Spike: {item['vol_multiple']:.1f}x V1 | Buy Vol: {item['buy_ratio']}%\n"
-            f"    └ Bandar 1W: {format_large_number(item['bandar_5d_val'], show_sign=True)} (ACCUM)\n\n"
-        )
-        
-        inline_keyboard.append([
-            {"text": f"📈 {item['symbol']} (Daily)", "callback_data": f"chart_{item['symbol']}_1d"},
-            {"text": f"📊 {item['symbol']} ({tf_code.upper()})", "callback_data": f"chart_{item['symbol']}_{tf_code}"}
-        ])
-
-        if len(current_msg) + len(item_str) > 3800:
-            send_reply(target_chat_id, current_msg, reply_markup={"inline_keyboard": inline_keyboard})
-            time.sleep(0.5)
-            current_msg = item_str
-            inline_keyboard = []
-        else:
-            current_msg += item_str
+async def button_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
     
-    if current_msg:
-        send_reply(target_chat_id, current_msg, reply_markup={"inline_keyboard": inline_keyboard})
-
-# ==========================================
-# HANDLER PERINTAH PANGGIL CHART BOT (/c)
-# ==========================================
-def process_chart_request(chat_id, stock_code, timeframe="1d"):
-    timeframe = timeframe.lower().strip()
-    if timeframe in ['d', 'day', 'daily', '1d']: timeframe = '1d'
-    if timeframe in ['5', '5mi', 'm5']: timeframe = '5m'
-    if timeframe in ['15', '15mi', 'm15']: timeframe = '15m'
-
-    send_reply(chat_id, f"📊 *Generating Pro Chart {stock_code.upper()} ({timeframe.upper()})...*")
-    df = fetch_stock_history_multi_tf(stock_code, timeframe=timeframe)
+    data = query.data.split("_")
+    action = data[0]
+    ticker = data[1]
     
-    if df is not None and not df.empty and len(df) >= 20:
-        column_mapping = {'open':'Open', 'high':'High', 'low':'Low', 'close':'Close', 'volume':'Volume'}
-        df.rename(columns=lambda x: column_mapping.get(str(x).lower().strip(), x), inplace=True)
-        
-        output_file = f"chart_{stock_code.lower()}_{timeframe}.png"
-        sector_info = f"{stock_code.upper()} | IHSG Trading System"
-        
-        generated_path = generate_pro_chart(df, symbol=stock_code.upper(), timeframe=timeframe, sector_info=sector_info, output_filename=output_file)
-        
-        last_close = safe_int(df['Close'].iloc[-1])
-        caption = f"📈 *PRO CHART {stock_code.upper()} ({timeframe.upper()})*\nLast Price: {last_close}"
-        
-        send_photo_reply(chat_id, generated_path, caption=caption)
-        
-        if os.path.exists(generated_path):
-            os.remove(generated_path)
-    else:
-        send_reply(chat_id, f"❌ Data saham untuk *{stock_code.upper()}* ({timeframe}) tidak ditemukan atau belum mencukupi.")
+    if action == "chart":
+        period = data[2] if len(data) > 2 else "Daily"
+        await process_chart_request(update, context, ticker, period=period)
 
 # ==========================================
-# MAIN LOOP SCANNER (AUTOMATION 10 MENIT)
+# 6. CRON TASK & MAIN RUNNER
 # ==========================================
-def main_screener_loop():
-    print("🚀 Screener Loop Aktif (Interval Scan: 10 Menit)...")
-    while SCREENER_ACTIVE:
+async def market_screener_job(app):
+    while True:
         try:
             if is_market_open():
-                print(f"[{get_now_wib().strftime('%H:%M:%S')}] Memulai Pemindaian Bursa...")
-                raw_signals = run_scan_process_custom_tf(timeframe="1d")
-                filtered_signals = filter_signals_with_cooldown(raw_signals)
+                logger.info("Menjalankan Auto Screener IHSG (RAFANO TRADER)...")
+                detected_signals = []
                 
-                if filtered_signals:
-                    broadcast_screening_results(
-                        signals=filtered_signals,
-                        title_header="🚨 *SIGNAL DETECTED — RAFANO VOLUME ENGINE*",
-                        tf_code="1d"
+                for ticker in TICKERS:
+                    df = fetch_stock_history_multi_tf(ticker, timeframe="Daily")
+                    if df is not None and not df.empty:
+                        sig = check_volume_spike_signal(df, ticker)
+                        if sig:
+                            detected_signals.append(sig)
+                
+                valid_signals = filter_signals_with_cooldown(detected_signals)
+                
+                for sig in valid_signals:
+                    msg = (
+                        f"🚨 **SINYAL AKUMULASI (RAFANO TRADER)** 🚨\n\n"
+                        f"Saham: **{sig['ticker']}**\n"
+                        f"Harga: Rp{sig['price']}\n"
+                        f"Rating: **{sig['rating']}** (Score: {sig['score']}%)\n"
+                        f"Buy Ratio: {sig['buy_ratio']}%\n"
+                        f"RSI: {sig['rsi']}\n"
                     )
-                else:
-                    print(f"[{get_now_wib().strftime('%H:%M:%S')}] Tidak ada sinyal baru atau masih terhalang cooldown.")
+                    keyboard = [
+                        [
+                            InlineKeyboardButton("Chart Daily", callback_data=f"chart_{sig['ticker']}_Daily"),
+                            InlineKeyboardButton("Chart 15M", callback_data=f"chart_{sig['ticker']}_15m")
+                        ]
+                    ]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    await app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=msg, parse_mode="Markdown", reply_markup=reply_markup)
             else:
-                print(f"[{get_now_wib().strftime('%H:%M:%S')}] Bursa Tutup. Standby...")
-
+                logger.info("Bursa tutup. Screener standby...")
+                
         except Exception as e:
-            print(f"❌ Exception pada Screener Loop: {e}")
+            logger.error(f"Error pada Screener Job: {e}")
+            
+        await asyncio.sleep(300)
 
-        # PENJADWALAN KEMBALI KE 1x 10 MENIT (600 DETIK)
-        time.sleep(600)
+def main():
+    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    
+    app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("chart", chart_command))
+    app.add_handler(CallbackQueryHandler(button_callback_handler))
+    
+    loop = asyncio.get_event_loop()
+    loop.create_task(market_screener_job(app))
+    
+    logger.info("Bot Telegram RAFANO TRADER Berhasil Dijalankan!")
+    app.run_polling()
 
 if __name__ == "__main__":
-    main_screener_loop()
+    main()
