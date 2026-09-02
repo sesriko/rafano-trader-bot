@@ -1,5 +1,5 @@
 # ============================================================
-# RAFANO TRADER V9.8 - FULL INTEGRATED BOT (INTERACTIVE + EOD SCAN)
+# RAFANO TRADER V9.9 - FULL INTEGRATED BOT (FIXED API PARSING)
 # ============================================================
 
 import os
@@ -128,7 +128,7 @@ async def fetch_active_watchlist() -> list:
 
 
 # ============================================================
-# 2. DATA STRUCTURE & FORMATTERS
+# 2. DATA STRUCTURE & ROBUST PARSERS
 # ============================================================
 
 @dataclass
@@ -156,36 +156,62 @@ class CompleteSignal:
     brokers_5d: str
     brokers_20d: str
 
+def parse_status_field(data: Optional[Dict[str, Any]]) -> str:
+    if not data:
+        return "NEUTRAL"
+    if isinstance(data, str):
+        return data.upper()
+    payload = data.get("data", data)
+    if isinstance(payload, dict):
+        return str(payload.get("status", payload.get("trend", "NEUTRAL"))).upper()
+    return "NEUTRAL"
+
 def parse_brokers_with_avg_and_value(data: Optional[Dict[str, Any]]) -> str:
     if not data:
         return "N/A"
-    brokers = data.get("top_buyers", data.get("brokers", []))
+    
+    payload = data.get("data", data)
+    brokers = []
+    if isinstance(payload, dict):
+        brokers = payload.get("top_buyers", payload.get("brokers", payload.get("buyer", [])))
+    elif isinstance(payload, list):
+        brokers = payload
+        
     if not brokers:
         return "Normal/Flat"
     
     formatted = []
     for b in brokers[:3]:
-        code = b.get("broker_code", b.get("code", "???"))
-        avg_price = b.get("avg_price", b.get("average", 0))
-        value = b.get("value", b.get("net_value", 0))
+        if not isinstance(b, dict):
+            continue
+        code = b.get("broker_code", b.get("code", b.get("broker", "???")))
+        avg_price = b.get("avg_price", b.get("average", b.get("avg", 0)))
+        value = b.get("value", b.get("net_value", b.get("val", 0)))
         
         val_str = ""
-        if value:
-            abs_val = abs(value)
-            if abs_val >= 1e9:
-                val_str = f"Rp{value/1e9:.1f}B"
-            elif abs_val >= 1e6:
-                val_str = f"Rp{value/1e6:.1f}M"
-            else:
-                val_str = f"Rp{value:,.0f}"
+        try:
+            if value is not None:
+                abs_val = abs(float(value))
+                if abs_val >= 1e9:
+                    val_str = f"Rp{float(value)/1e9:.1f}B"
+                elif abs_val >= 1e6:
+                    val_str = f"Rp{float(value)/1e6:.1f}M"
+                else:
+                    val_str = f"Rp{float(value):,.0f}"
+        except Exception:
+            pass
                 
-        if avg_price > 0 and val_str:
-            formatted.append(f"{code}(@Rp{avg_price:,.0f}|{val_str})")
-        elif avg_price > 0:
-            formatted.append(f"{code}(@Rp{avg_price:,.0f})")
-        else:
-            formatted.append(code)
-    return ", ".join(formatted)
+        try:
+            if avg_price and float(avg_price) > 0 and val_str:
+                formatted.append(f"{code}(@Rp{float(avg_price):,.0f}|{val_str})")
+            elif avg_price and float(avg_price) > 0:
+                formatted.append(f"{code}(@Rp{float(avg_price):,.0f})")
+            else:
+                formatted.append(code)
+        except Exception:
+            formatted.append(str(code))
+            
+    return ", ".join(formatted) if formatted else "Normal/Flat"
 
 
 # ============================================================
@@ -256,19 +282,24 @@ async def build_complete_signal_async(ticker: str) -> Optional[Tuple[CompleteSig
     rel_vol = float(latest['rel_vol']) if not np.isnan(latest['rel_vol']) else 1.0
     atr = float(latest['atr']) if not np.isnan(latest['atr']) else (price * 0.03)
     
-    bandar_1d = (market_data.get("bandar_1d") or {}).get("status", "NEUTRAL")
-    bandar_5d = (market_data.get("bandar_5d") or {}).get("status", "NEUTRAL")
-    bandar_20d = (market_data.get("bandar_20d") or {}).get("status", "NEUTRAL")
+    bandar_1d = parse_status_field(market_data.get("bandar_1d"))
+    bandar_5d = parse_status_field(market_data.get("bandar_5d"))
+    bandar_20d = parse_status_field(market_data.get("bandar_20d"))
     
-    foreign_1d = (market_data.get("foreign_1d") or {}).get("status", "NEUTRAL")
-    foreign_5d = (market_data.get("foreign_5d") or {}).get("status", "NEUTRAL")
-    foreign_20d = (market_data.get("foreign_20d") or {}).get("status", "NEUTRAL")
+    foreign_1d = parse_status_field(market_data.get("foreign_1d"))
+    foreign_5d = parse_status_field(market_data.get("foreign_5d"))
+    foreign_20d = parse_status_field(market_data.get("foreign_20d"))
     
     brokers_1d = parse_brokers_with_avg_and_value(market_data.get("broker_1d"))
     brokers_5d = parse_brokers_with_avg_and_value(market_data.get("broker_5d"))
     brokers_20d = parse_brokers_with_avg_and_value(market_data.get("broker_20d"))
     
-    company_name = (market_data.get("analysis") or {}).get("company_name", ticker)
+    analysis_res = market_data.get("analysis") or {}
+    if isinstance(analysis_res, dict):
+        company_name = analysis_res.get("company_name", ticker)
+    else:
+        company_name = ticker
+        
     last_date = df.index[-1].strftime("%d %b %Y")
     
     score = min(max((20 if price > ema_50 else 0) + (15 if 50 <= rsi <= 75 else 5) + (15 if rel_vol > 1.2 else 0) +
@@ -353,7 +384,7 @@ async def run_eod_market_scanner(bot_app_or_token):
     tickers = await fetch_active_watchlist()
     results = []
     
-    for ticker in tickers[:150]: # Batasi agar proses efisien
+    for ticker in tickers[:150]:
         market_data = await MarketDataProvider.fetch_all_market_data(ticker)
         df = MarketDataProvider.get_history_sync(ticker, limit=50)
         if df is None or len(df) < 25:
@@ -371,12 +402,14 @@ async def run_eod_market_scanner(bot_app_or_token):
         rel_vol = float(latest['volume'] / latest['vol_ma20']) if latest['vol_ma20'] > 0 else 1.0
         atr = float(latest['atr']) if not np.isnan(latest['atr']) else (close_price * 0.03)
         
-        bandar_1d = (market_data.get("bandar_1d") or {}).get("status", "NEUTRAL")
-        bandar_5d = (market_data.get("bandar_5d") or {}).get("status", "NEUTRAL")
-        bandar_20d = (market_data.get("bandar_20d") or {}).get("status", "NEUTRAL")
+        bandar_1d = parse_status_field(market_data.get("bandar_1d"))
+        bandar_5d = parse_status_field(market_data.get("bandar_5d"))
+        bandar_20d = parse_status_field(market_data.get("bandar_20d"))
         
         if bandar_1d == "ACCUMULATION" and rel_vol >= 1.3 and change_pct >= 0.5:
-            comp_name = (market_data.get("analysis") or {}).get("company_name", ticker)
+            analysis_res = market_data.get("analysis") or {}
+            comp_name = analysis_res.get("company_name", ticker) if isinstance(analysis_res, dict) else ticker
+            
             stop_loss = close_price - (1.5 * atr)
             target_1 = close_price + (2.0 * atr)
             target_2 = close_price + (3.5 * atr)
@@ -404,7 +437,7 @@ async def run_eod_market_scanner(bot_app_or_token):
             message += (
                 f"{idx}. *{res['ticker']}* - {res['name']}\n"
                 f"   💰 Close: `Rp{res['close']:,.0f}` (`{res['change']:+.2f}%`) | Vol: `{res['vol']}x`\n"
-                f"   🐋 Bandar -> 1D: `{res['b1']}` | 5D: `{res['b20']}`\n"
+                f"   🐋 Bandar -> 1D: `{res['b1']}` | 5D: `{res['b5']}` | 20D: `{res['b20']}`\n"
                 f"   🏛 Top Broker (1D): `{res['br1']}`\n"
                 f"   🏛 Top Broker (5D): `{res['br5']}`\n"
                 f"   🏛 Top Broker (20D): `{res['br20']}`\n"
@@ -430,7 +463,7 @@ def main():
     scheduler.add_job(run_eod_market_scanner, 'cron', hour=19, minute=0, args=[app])
     scheduler.start()
     
-    logger.info("Rafano Trader Bot V9.8 is running...")
+    logger.info("Rafano Trader Bot V9.9 is running...")
     app.run_polling()
 
 if __name__ == "__main__":
